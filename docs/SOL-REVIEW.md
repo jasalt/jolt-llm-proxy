@@ -26,11 +26,11 @@ Progress is updated with each atomic implementation commit.
 | Done | P0 | Make WebSocket pool acquisition/release atomic | Added serialized pool transitions, identity-checked/idempotent release, and idempotent connection close |
 | Done | P0 | Guarantee acquired WS connections are released on every failure | `ws-source` now releases with `keep=false` if setup or the initial write fails |
 | Done | P0 | Report chat stream failures as failures | Failed streams now emit an error, never a successful stop chunk, and finalize with `:completed false` |
-| Done | P1 | Add real automated tests and CI | Added 10 deterministic tests (25 assertions), a failing test runner, and a Jolt v0.7.16 CI workflow |
+| Done | P1 | Add real automated tests and CI | Added deterministic tests (now 25 tests / 78 assertions incl. replay-based collector and validation tests), a failing test runner, and a Jolt v0.7.16 CI workflow |
 | Done | P1 | Bound and normalize client session IDs and pool cardinality | IDs are allowlisted/clamped and the cache is capped at 128 sessions with idle LRU eviction |
 | Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
-| In progress | P1 | Consolidate runtime ownership and split `codex.proxy` | Runtime ownership and dependency injection are complete; splitting transport/collector namespaces remains |
-| In progress | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Top-level/model/messages/input types and item counts are validated; string-key parsing and deeper per-field limits remain |
+| Done | P1 | Consolidate runtime ownership and split `codex.proxy` | Runtime ownership and dependency injection are complete; transports live in `codex.transport.*`, collectors in `codex.collect`, and `codex.proxy` is the ring boundary (routes, guard, handlers) |
+| Done | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Both endpoints parse with string keys, validate nested shapes/limits, and keywordize only recognized keys; unknown `/v1/responses` keys pass through upstream unchanged |
 | Done | P2 | Correct operational documentation and CLI behavior | README now documents prerequisites, tests, private-API/local security, address constraints, and credential modes; TODO status was reconciled |
 
 ## P0 — security and correctness
@@ -309,12 +309,17 @@ exact owned resources. Avoid globally shared pools across start/stop cycles.
 
 ### 9. Split transport, collection, and routing
 
-**Status: in progress.** Outbound HTTP, 401 retry, SSE parsing, and source
+**Status: implemented.** Outbound HTTP, 401 retry, SSE parsing, and source
 cleanup now live in `codex.transport.sse` with focused parser tests. Pooled WS
 acquisition, delta continuation, initialization cleanup, event adaptation, and
-finalization now live in `codex.transport.ws`. Runtime injection was completed
-in item 8. Collectors and Ring routes still need extraction in similarly bounded
-commits.
+finalization now live in `codex.transport.ws`. Both event collectors (chat and
+responses, streaming and non-streaming) now live in `codex.collect` with
+replay-based tests; `codex.proxy` retains only the ring boundary — routes,
+API-key guard, session normalization, transport selection, and endpoint
+handlers. Collector accumulators still hold `StringBuilder`s inside atoms; the
+remaining `codex.http`-style route extraction and fully pure reducers were
+deliberately not pursued (the handlers are small and the mutable accumulators
+are confined to `codex.collect`).
 
 **Location:** `src/codex/proxy.clj`
 
@@ -336,10 +341,18 @@ straightforward and eliminate subtle `swap!`/mutation interactions.
 
 ### 10. Validate untrusted JSON before translation
 
-**Status: partially implemented.** Both endpoints now require an object body,
-a non-empty string model, correct messages/input container types, map-shaped
-chat messages with string roles, and at most 1000 messages/input items. Parsing
-with string keys and detailed limits for nested tools/content remain open.
+**Status: implemented.** Both endpoints parse client JSON with string keys
+and validate before any keyword conversion. Top-level shape, model, messages,
+input types and counts are checked, plus nested limits: stream must be boolean,
+tools/functions bounded vectors of maps (≤128) with validated `function`
+sub-objects, message content a string or vector of part objects, `tool_choice`
+a string or object, `temperature` a number, and a 32-level nesting cap on
+keywordized input items. `chat-to-responses` extracts recognized fields
+explicitly (unknown fields dropped); `prepare-responses` keywordizes a known
+top-level key set and passes unknown keys through upstream with their original
+string keys as the documented compatibility policy. Input items are keywordized
+recursively (bounded) so continuation prefix matching is preserved; covered by
+a regression test.
 
 **Locations:** `src/codex/translate.clj`, `src/codex/proxy.clj:34-47`
 
@@ -395,9 +408,12 @@ and protocol drift.
 
 ### 12. Stop printing secrets and raw identifiers
 
-**Status: partially implemented.** Server startup now prints only whether API
-key authentication is enabled, never the key itself. Session diagnostics and
-the deliberately detailed `info!` output still need a redaction policy.
+**Status: implemented for startup output; `info!` redaction still open.**
+Server startup prints only whether API key authentication is enabled (never
+the key) and a short SHA-256 hash of the session id (`codex.id/short-hash`)
+for correlation. The deliberately detailed `info!` output still needs a
+redaction policy (redacted default + explicit `--full` mode), and the scattered
+`println` calls have not been replaced by a leveled structured logger.
 
 **Locations:** `src/codex/core.clj:63-66`, `src/codex/proxy.clj:194-231`,
 `src/codex/cli.clj:320-380`
@@ -464,9 +480,11 @@ usable when persistence fails and communicate that state clearly.
 ### 15. Remove duplication and use idiomatic data transformations
 
 **Status: in progress.** Cryptographic hex ID generation is centralized in
-`codex.id/random-hex`, and continuation normalization now uses immutable
-`dissoc` rather than an atom/doseq map rebuild. The collector decomposition
-from item 9 remains the largest outstanding style improvement.
+`codex.id/random-hex` (now alongside `sha256-hex`/`short-hash`), and continuation
+normalization uses immutable `dissoc` rather than an atom/doseq map rebuild.
+The collector decomposition from item 9 is done (collectors now live in
+`codex.collect`); remaining style work is the error-mapping duplication noted
+in item 14 and the `translate.clj` atom-based accumulators.
 
 Examples:
 
@@ -493,7 +511,11 @@ advice.
 prerequisites, the deterministic test command, private Subscription API risk,
 loopback/local trust assumptions, address constraints, and credential modes.
 TODO phase/status contradictions and completed review tasks were reconciled;
-generated development directories are now ignored.
+generated development directories are now ignored. TODO.md now carries an
+explicit historical-plan header (current backlog is this file and
+`K3-REVIEW-2.md`), and the scratch scripts were moved out of the repo root
+(`ws_handshake.clj` → `examples/`; `throwtest.clj`/`test_continuation.clj`
+deleted, superseded by `test/codex/`).
 
 **Locations:** `README.md`, `TODO.md`, `JOLT-ISSUES.md`
 

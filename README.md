@@ -99,11 +99,16 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
   `store:false`), normalizes prior output into input items, lenient prefix match
   (assistant text matched on role only).
 - **`codex.translate`** — `/v1/chat/completions` ↔ `/v1/responses` translation.
+  Parses client JSON with string keys and validates it (nested type checks,
+  message/tool/item caps) before any keyword conversion; unknown top-level
+  `/v1/responses` keys pass through upstream unchanged.
 - **`codex.cli`** — `login` (browser PKCE + headless device code), `logout`,
   `usage` (weekly allowance), `info` (JWT claim dump); ports Go `auth.go`/
   `usage.go`/`info.go`.
-- **`codex.proxy`** — ring handler, routes, `prompt_cache_key`, SSE/WS event
-  collectors. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
+- **`codex.collect`** — event collectors that reduce upstream events into
+  OpenAI-shaped output (chat + responses, streaming and non-streaming).
+- **`codex.proxy`** — Ring boundary: routes, API-key guard, `prompt_cache_key`,
+  transport selection, endpoint handlers. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
   `request->ring` builds them with `{}`/`assoc`): use `(:headers req)`,
   `get-in`, `assoc` normally — do **not** use `jolt.host/ref-get` there (it
   returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the

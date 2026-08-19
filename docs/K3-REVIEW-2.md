@@ -9,8 +9,9 @@ Feature-complete Clojure-on-Chez (Jolt) port of the Go proxy, **verified end-to-
 ```
 codex.core      — sole lifecycle owner: system atom, transactional start!/idempotent stop!, CLI dispatch
  ├─ codex.cli   — login (browser PKCE + device code), logout, usage, info
- └─ codex.proxy — ring handler, routing, API-key guard, session normalization, SSE/chat collectors (544 LOC, largest)
-     ├─ codex.transport.sse  — outbound HTTP/SSE, one 401-retry with forced refresh; {:read :finalize} interface
+ └─ codex.proxy — Ring boundary: routes, API-key guard, session normalization, transport selection, handlers (~230 LOC)
+     ├─ codex.collect           — chat + responses event collectors (streaming/non-streaming), usage/error formatting
+     ├─ codex.transport.sse     — outbound HTTP/SSE, one 401-retry with forced refresh; {:read :finalize} interface
      ├─ codex.transport.ws   — pooled WS event-source lifecycle, delta continuation acquire
      │    └─ codex.ws        — hand-rolled RFC 6455 client over jolt.http.tls; per-session pool
      │                        (128 cap, LRU eviction, 5m idle TTL, 55m max age, serialized acquire/release)
@@ -27,17 +28,37 @@ Notable design decisions that are in good shape:
 ## SOL-REVIEW remediation status
 
 - **P0 (security/correctness): all 4 done** — credential file protection, pool atomicity, release-on-failure, stream-failure reporting.
-- **P1: 5 of 7 done** (tests+CI, session bounding, OAuth callback, runtime ownership, WS frame hardening incl. 64 MiB aggregate cap).
-- **2 in progress:**
-  1. **Split `codex.proxy`** — transport namespaces extracted; collectors (`consume-chat`, `stream-chat`, `collect-response`, ~400 LOC) still live in proxy.clj.
-  2. **Request validation** — top-level/model/messages validated; string-key parsing and deeper per-field limits remain.
-- **P2 partial:** item 12 (stop printing identifiers — `start!` still prints the raw session-id; `info!` needs a redacted default); items 14–16 (error taxonomy, duplication, TODO.md reconciliation) pending.
+- **P1: all 7 done** (tests+CI, session bounding, OAuth callback, runtime ownership, WS frame hardening incl. 64 MiB aggregate cap, **proxy split**, **request validation** — the last two were completed 2026-08-19, see below).
+- **P2:** item 13 done; item 12 done for startup output (startup prints a hashed session id; `info!` redaction + structured logging remain); items 14–15 partially done; item 16 done.
 
 ## Loose ends worth addressing
 
-1. **Repo-root scratch files**: `throwtest.clj` (4-line scratch), `test_continuation.clj`, `ws_handshake.clj`. README references `ws_handshake.clj` as the proven handshake recipe — move it to `examples/` or `dev/` and delete the other two.
-2. **TODO.md duality** — flagged in the review: it's simultaneously a stale implementation plan (Phase 1 "IN PROGRESS" vs. table "done") and a backlog. Convert to historical doc or prune.
-3. **`codex.core` prints raw session-id** at startup (SOL-REVIEW #12) — trivial fix.
-4. **Remaining proxy split + validation depth** — the two in-progress P1 items; both have clear acceptance criteria in SOL-REVIEW.
+All four items below were addressed on 2026-08-19 (commits `b89cea9`…):
 
-**Bottom line:** the architecture has converged well — single lifecycle owner, injected dependencies, clean transport abstraction, hardened security posture. What remains is finishing the proxy decomposition, deepening input validation, a redaction/logging pass, and doc hygiene. No structural rework is warranted.
+1. **Repo-root scratch files** — ✅ `ws_handshake.clj` moved to `examples/`;
+   `throwtest.clj` and `test_continuation.clj` deleted (superseded by
+   `test/codex/continuation_test.clj`); README/TODO references updated.
+2. **TODO.md duality** — ✅ converted to a historical implementation plan with
+   an explicit header pointing at `SOL-REVIEW.md`/`K3-REVIEW-2.md` as the
+   current backlog; stale status markers (Phase 8 "README update pending",
+   the never-checked-in `test_e2e.clj`) reconciled.
+3. **`codex.core` prints raw session-id** — ✅ startup now prints an 8-char
+   SHA-256 prefix (`codex.id/short-hash`) instead of the raw id.
+4. **Remaining proxy split + validation depth** — ✅ both completed:
+   - **Split:** collectors extracted to `codex.collect` (chat + responses,
+     streaming and non-streaming) with replay-based tests; `codex.proxy`
+     (544 → ~230 LOC) is now the pure Ring boundary (routes, guard, transport
+     selection, handlers).
+   - **Validation depth:** both translate entry points parse with string keys
+     and validate before any keyword conversion (boolean `stream`, bounded
+     vector-of-map `tools`/`functions` ≤128 with validated `function`
+     sub-objects, content-part shapes, numeric `temperature`, 32-level nesting
+     cap). `chat-to-responses` drops unknown top-level fields;
+     `prepare-responses` keywordizes a known key set and passes unknown keys
+     through upstream with string keys; input items stay keywordized
+     (regression-tested) so delta continuation keeps working.
+
+Test suite grew from 16 tests / 40 assertions to 25 tests / 78 assertions;
+CI namespace load list updated for `codex.collect`.
+
+**Bottom line:** the architecture has converged well — single lifecycle owner, injected dependencies, clean transport abstraction, hardened security posture. The review's loose ends are all closed; what remains is the P2 polish tail: `info!` redaction with a structured logger (SOL-REVIEW #12), the error-taxonomy/diagnostics pass (#14), and remaining minor style cleanup (#15). No structural rework is warranted.
