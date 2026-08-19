@@ -168,7 +168,7 @@
               (recur (str/trim (subs line 6)) data)
               (str/starts-with? line "data:")
               (recur event (conj data (str/trim (subs line 5))))
-              :else (recur event data))))))
+              :else (recur event data))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Transport selection: WebSocket continuation vs SSE fallback
@@ -620,4 +620,3 @@
       :else (write-openai-error 404 "not_found" "Not found"))))
 
 (def handler #'app)
-))

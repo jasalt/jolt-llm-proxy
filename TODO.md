@@ -145,7 +145,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 - [x] Phase 3 — `codex.continuation` (done; delta + lenient prefix match verified)
 - [x] Phase 4 — `codex.translate` (done; chat↔responses + prepare verified)
 - [x] Phase 5 — `codex.proxy` (done; routes, auth guard, SSE/WS transport, collectors verified to load)
-- [ ] Phase 6 — `codex.core`
+- [x] Phase 6 — `codex.core` (done; startup/shutdown, persistent auth state, server wiring; CLI secondary commands stubbed)
 - [ ] Phase 7 — End-to-end verification
 - [ ] Phase 8 — Docs, issues, polish
 
@@ -652,7 +652,7 @@ curl must stream `data: {...}` chunks ending in `data: [DONE]`.
 
 ---
 
-## Phase 6 — `codex.core` (server + state)
+## Phase 6 — `codex.core` (server + state) — DONE ✓
 
 **Goal:** wire it all together; `start!`/`stop!`; persistent state.
 
