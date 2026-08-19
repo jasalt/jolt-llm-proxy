@@ -18,7 +18,7 @@
 ;; Config (populated by codex.core/start!)
 ;; ---------------------------------------------------------------------------
 
-(def system (atom nil))
+(defonce system (atom nil))
 
 (defn set-system! [m] (reset! system m))
 
@@ -100,7 +100,7 @@
    :headers {"Content-Type" "application/json"}
    :body (json/write-str {:status "ok"})})
 
-(defn models []
+(defn models [_req]
   (let [now (long (/ (System/currentTimeMillis) 1000))
         data (vec (map (fn [id] {:id id :object "model"
                                  :created now :owned_by "openai-codex"})
@@ -117,12 +117,11 @@
   (let [store (:store @system)
         payload (json/write-str body)]
     (loop [attempt 0]
-      (let [[token account-id] (auth/token store (= attempt 1))
+      (let [[token account-id] (auth/token store :force (= attempt 1))
             resp (http/post upstream-responses-url
                     {:body payload
                      :content-type "application/json"
                      :accept "text/event-stream"
-                     :as :stream
                      :throw-exceptions false
                      :headers {"Authorization" (str "Bearer " token)
                                "ChatGPT-Account-Id" account-id
@@ -154,7 +153,9 @@
 
 (defn read-sse [in emit]
   (let [rdr (java.io.BufferedReader.
-              (java.io.InputStreamReader. in "UTF-8"))]
+              (if (string? in)
+                (java.io.StringReader. in)
+                (java.io.InputStreamReader. in "UTF-8")))]
     (loop [event nil data []]
       (let [line (.readLine rdr)]
         (if (nil? line)
@@ -195,7 +196,11 @@
             (println "ws-source: using delta continuation for" session-id))
         frame (assoc request-body :type "response.create")
         _ (ws/write-text (:conn acq) (json/write-str frame))
-        read (fn [emit] (ws/read-until-terminal (:conn acq) emit))
+        read (fn [emit]
+               (ws/read-until-terminal
+                (:conn acq)
+                (fn [event]
+                  (emit {:name (:type event) :data (:data event)}))))
         finalize (fn [meta]
                    (let [keep (and (:completed meta) (not= (:response-id meta) ""))]
                      (when keep
@@ -211,8 +216,8 @@
 (defn sse-source [request session-id]
   (let [in (upstream-sse request session-id)]
     {:read (fn [emit] (read-sse in emit))
-     :finalize (fn [_] (try (when (instance? java.io.InputStream in)
-                              (.close ^java.io.InputStream in))
+     :finalize (fn [_] (try (when (instance? java.io.Closeable in)
+                              (.close ^java.io.Closeable in))
                             (catch Throwable _ nil)))}))
 
 (defn open-event-source [request session-id for-chat]
@@ -262,7 +267,7 @@
       (let [delta (get data :delta)]
         (when (and delta (not= delta ""))
           (.append (:text acc) delta)
-          (when emit (emit {:content delta}))
+          (when emit (emit {:content delta})))
         acc)
 
       (or (= name "response.reasoning_summary_text.delta")
@@ -270,7 +275,7 @@
       (let [delta (get data :delta)]
         (when (and delta (not= delta ""))
           (.append (:reasoning acc) delta)
-          (when emit (emit {:reasoning_content delta}))
+          (when emit (emit {:reasoning_content delta})))
         acc)
 
       (or (= name "response.output_item.added")
@@ -365,7 +370,7 @@
              (when (map? (get usage :input_tokens_details))
                {:prompt_tokens_details (get usage :input_tokens_details)})
              (when (map? (get usage :output_tokens_details))
-               {:completion_tokens_details (get usage :output_tokens_details)}))))))
+               {:completion_tokens_details (get usage :output_tokens_details)})))))
 
 (defn stream-chat [read-fn model ch]
   (let [id (str "chatcmpl-" (random-id))
@@ -510,7 +515,7 @@
                                        (get response :output) (:items @acc))))
                      (or (= name "response.failed") (= name "error"))
                      (throw (ex-info (str "Codex response failed: "
-                                          (error-message data)) {})))))))
+                                          (error-message data)) {}))))))
       (catch Throwable t (throw t)))
     (let [a @acc
           result (:result a)]
