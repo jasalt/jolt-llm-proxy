@@ -8,9 +8,38 @@ for generic LLM clients, with multi-turn WebSocket delta continuation
 (`previous_response_id`) so prompt-cache `cached` bytes grow with conversation
 history.
 
-> **Status:** inbound HTTP server + outbound wss handshake verified; `codex.*`
-> namespaces and end-to-end multi-turn verification in progress — see
-> [`TODO.md`](./TODO.md).
+> **Status:** feature-complete and verified end-to-end against the live ChatGPT
+> subscription backend: `/v1/responses` + `/v1/chat/completions` (streaming and
+> non-streaming), WebSocket delta continuation, SSE fallback, token refresh,
+> API-key guard, and the `login`/`logout`/`usage`/`info` CLI — see
+> [`TODO.md`](./TODO.md) Phase 7.
+
+## Usage
+
+```bash
+# Log in (browser PKCE on localhost:1455, or headless device code):
+jolt -m codex.core login
+
+# Serve an OpenAI-compatible API (env: CHATGPT_ADAPTER_ADDR, CHATGPT_ADAPTER_API_KEY):
+CHATGPT_ADAPTER_ADDR=127.0.0.1:8090 CHATGPT_ADAPTER_API_KEY=my-key jolt -m codex.core serve
+
+curl -H 'Authorization: Bearer my-key' http://127.0.0.1:8090/v1/models
+curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
+     -H 'X-Session-Id: conv-1' \
+     -d '{"model":"gpt-5.4-mini","input":"hello","stream":true}' \
+     http://127.0.0.1:8090/v1/responses
+
+# Account status:
+jolt -m codex.core usage   # weekly Codex allowance
+jolt -m codex.core info     # credentials + JWT claims
+jolt -m codex.core logout
+```
+
+Requests carrying an `X-Session-Id` (or `X-Prompt-Cache-Key`) header are routed
+over pooled WebSocket connections with multi-turn delta continuation; requests
+without one fall back to plain SSE. Credentials live at
+`~/.config/chatgpt-openai-api-adapter/auth.json` (override with
+`CHATGPT_ADAPTER_AUTH_FILE`), shared with the Go original.
 
 ## Why Jolt
 
@@ -42,6 +71,9 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
   `store:false`), normalizes prior output into input items, lenient prefix match
   (assistant text matched on role only).
 - **`codex.translate`** — `/v1/chat/completions` ↔ `/v1/responses` translation.
+- **`codex.cli`** — `login` (browser PKCE + headless device code), `logout`,
+  `usage` (weekly allowance), `info` (JWT claim dump); ports Go `auth.go`/
+  `usage.go`/`info.go`.
 - **`codex.proxy`** — ring handler, routes, `prompt_cache_key`, SSE/WS event
   collectors. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
   `request->ring` builds them with `{}`/`assoc`): use `(:headers req)`,
@@ -65,7 +97,7 @@ ss -ltn | grep 7888
 cat .nrepl-port
 
 # 2. Iterate. Live-reload a namespace into the running proxy:
-brepl eval -e '(require (quote codex.proxy) :reload)'
+brepl -p 7888 '(require (quote codex.proxy) :reload)'
 
 # 3. Evaluate a file:
 brepl -f ws_handshake.clj
@@ -90,10 +122,13 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
 - [`CLOJURE-CONVERGENCE.md`](./CLOJURE-CONVERGENCE.md) — Clojure-language
   divergences confirmed against Babashka (`bb`).
 
-The single most important gotcha: **`jolt.host/tagged-table` does not implement
-`IFn`**, so `(:write st)` / `(:headers req)` return `nil` silently. Use
-`jolt.host/ref-get`. This was the real cause of every earlier "FFI
-contamination" / "BIO_ctrl nil" symptom.
+The two most dangerous gotchas: **`jolt.host/tagged-table` does not implement
+`IFn`**, so `(:write st)` on the outbound TLS stream returns `nil` silently —
+use `jolt.host/ref-get` (but never on Ring PMaps, where it is the wrong
+accessor). And the **AOT cache + reader form-swallowing** trap: a top-level
+form missing its closing paren silently absorbs the rest of the file, leaving
+vars *interned but unbound*, while `brepl balance` fails with `Unable to fix`.
+See [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §7–§8.
 
 ## References
 
