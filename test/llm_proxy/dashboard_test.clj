@@ -40,6 +40,6 @@
     (is (= false (contains? snapshot :session-id)))
     (is (= false (contains? snapshot :store)))
     (is (.contains event "event: datastar-patch-elements"))
-    (is (.contains event "data: selector\r\ndata: #dashboard"))
+    (is (.contains event "data: selector #dashboard"))
     (is (not (.contains event "secret-token")))
     (async/close! (:body response))))

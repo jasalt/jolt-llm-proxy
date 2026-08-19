@@ -34,9 +34,9 @@
 
 (defn- patch-event [runtime]
   {:event "datastar-patch-elements"
-   :data (str "selector\n#dashboard\n"
-              "mode\nouter\n"
-              "elements\n" (fragment runtime))})
+   :data (str "selector #dashboard\n"
+              "mode outer\n"
+              "elements " (fragment runtime))})
 
 (defn- offer-event! [ch event]
   (async/offer! ch (sse/format-event event)))
