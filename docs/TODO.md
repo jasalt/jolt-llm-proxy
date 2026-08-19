@@ -1,5 +1,12 @@
 # TODO — Jolt port of chatgpt-openai-api-adapter
 
+> **Historical implementation plan — retained for reference.** All phases are
+> complete and the port is verified end-to-end; this file is no longer a
+> backlog. Current remediation state lives in
+> [`SOL-REVIEW.md`](./SOL-REVIEW.md) (prioritized review) and
+> [`K3-REVIEW-2.md`](./K3-REVIEW-2.md) (architecture review). Do not add new
+> work items here.
+
 Port the Go proxy (`../chatgpt-openai-api-adapter`) to Clojure-on-Chez (Jolt),
 using `ring-chez-adapter` for the inbound HTTP/1.1 server and `jolt.http.net` +
 `jolt.http.tls` (from `jolt-lang/http-client`) for the outbound TLS + WebSocket
@@ -103,7 +110,7 @@ ss -ltn | grep 7888 && cat .nrepl-port
 `jolt.http.tls/tls-connect` works **unmodified**. The full
 `wss://chatgpt.com/backend-api/codex/responses` handshake
 (`101 Switching Protocols` + valid `sec-websocket-accept`) is proven in
-`ws_handshake.clj` — read it as the reference. Key points:
+`examples/ws_handshake.clj` — read it as the reference. Key points:
 
 - `(def st (tls/tls-connect "chatgpt.com" 443 false 20000 20000))`
 - `(def wfn (jolt.host/ref-get st :write))` / `(def rfn (jolt.host/ref-get st :read))`
@@ -153,7 +160,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
   recall instead of cache growth)
 - [x] Phase 8 — Docs, issues, polish (CLI commands ported: login/logout/usage/info;
   AOT-cache + form-swallowing gotchas documented as JOLT-GOTCHAS §7/§8; README
-  update pending)
+  updated with architecture, usage, tests, and security model)
 
 ---
 
@@ -161,7 +168,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 
 - [x] `deps.edn` (ring-chez-adapter + http-client + data.json + time)
 - [x] nREPL + `brepl '<form>'` workflow verified (port 7888, this dir)
-- [x] Outbound TLS + WebSocket handshake verified end-to-end (`ws_handshake.clj` → 101)
+- [x] Outbound TLS + WebSocket handshake verified end-to-end (`examples/ws_handshake.clj` → 101)
 - [x] Diagnosed real blocker (R1: tagged-table `ref-get`), removed misdiagnosed vendor
 - [x] Filed `JOLT-ISSUES.md`, `CLOJURE-CONVERGENCE.md`, `JOLT-GOTCHAS.md`
 
@@ -314,7 +321,7 @@ ping/pong/close, and a per-session connection pool with idle TTL. Mirror Go
 
 ### 2b — `dial [token account-id session-id]` → `{:stream :handshake-data}`
 
-Build the upgrade request exactly like `ws_handshake.clj` (copy that string),
+Build the upgrade request exactly like `examples/ws_handshake.clj` (copy that string),
 with headers:
 `Authorization: Bearer <token>`, `ChatGPT-Account-Id: <account-id>`,
 `OpenAI-Beta: responses_websockets=2026-02-06`, `originator: pi`,
@@ -790,6 +797,10 @@ WS requests, same-session two-turn WS reuse, proxy reload, and stop/start.
 The SSE client returns an eagerly collected string because Jolt's HTTP client
 cannot safely expose its advertised `:as :stream` body on this platform.
 
+> Historical note: the planned `test_e2e.clj` script was never checked in; Phase 7
+> was verified through the recorded live smoke tests below, and the durable
+> deterministic suite lives in `test/codex/` (`jolt -M:test -m codex.test-runner`).
+
 Each sub-item: write the exact `curl`/`brepl` command and the assertion in
 `test_e2e.clj`. Print `PASS`/`FAIL` per case.
 
@@ -829,7 +840,7 @@ Each sub-item: write the exact `curl`/`brepl` command and the assertion in
 - Go reference: `../chatgpt-openai-api-adapter/*.go`
   (`auth.go`, `websocket.go`, `continuation.go`, `translate.go`, `proxy.go`,
   `usage.go`, `info.go`, `main.go`).
-- Proven WS handshake recipe: `ws_handshake.clj` (this dir).
+- Proven WS handshake recipe: `examples/ws_handshake.clj`.
 - Jolt libs (read-only, in `~/.jolt/gitlibs`):
   `jolt-lang/ring-chez-adapter` (`ring-chez.adapter`, `ring-chez.sse`,
   `ring-chez.http`, `ring-chez.socket`), `jolt-lang/http-client`

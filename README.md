@@ -128,10 +128,10 @@ cat .nrepl-port
 brepl -p 7888 '(require (quote codex.proxy) :reload)'
 
 # 3. Evaluate a file:
-brepl -f ws_handshake.clj
+brepl -f examples/ws_handshake.clj
 ```
 
-`ws_handshake.clj` is the proven end-to-end recipe for the outbound wss
+`examples/ws_handshake.clj` is the proven end-to-end recipe for the outbound wss
 handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
 `HTTP/1.1 101 Switching Protocols` + a valid `sec-websocket-accept`.
 
