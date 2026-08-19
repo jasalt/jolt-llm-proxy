@@ -7,7 +7,10 @@
 
 (defn runtime []
   {:store (atom {:access_token "secret-token" :account_id "account"})
-   :pool (atom {})
+   :pool (atom {"raw-session-id" {:busy false
+                                   :created-at (- (System/currentTimeMillis) 2000)
+                                   :last-used (- (System/currentTimeMillis) 1000)
+                                   :conn {:continuation (atom {:id "private"})}}})
    :session-id "raw-session-id"
    :api-key "secret-api-key"
    :port 8080
@@ -41,7 +44,14 @@
         event (async/<!! (:body response))]
     (is (= false (contains? snapshot :session-id)))
     (is (= false (contains? snapshot :store)))
+    (is (= 1 (get-in snapshot [:codex :ws-pool :entries])))
+    (is (= 128 (get-in snapshot [:codex :ws-pool :capacity])))
+    (is (= true (get-in snapshot [:codex :ws-pool :sessions 0 :continuation])))
+    (is (not= "raw-session-id" (get-in snapshot [:codex :ws-pool :sessions 0 :id])))
     (is (.contains event "event: datastar-patch-elements"))
     (is (.contains event "data: selector #dashboard"))
+    (is (.contains event "WebSocket pool"))
+    (is (.contains event "Token expiry"))
     (is (not (.contains event "secret-token")))
+    (is (not (.contains event "raw-session-id")))
     (async/close! (:body response))))

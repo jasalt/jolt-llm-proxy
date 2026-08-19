@@ -15,21 +15,41 @@
         (.replace "\"" "&quot;")
         (.replace "'" "&#39;"))))
 
+(defn- session-row [{:keys [id state age-seconds idle-seconds continuation]}]
+  (str "<tr><td>" (escape-html id) "</td><td>" (escape-html (name state))
+       "</td><td>" (escape-html age-seconds) "s</td><td>"
+       (escape-html (or idle-seconds "—")) "</td><td>"
+       (if continuation "yes" "no") "</td></tr>"))
+
 (defn- fragment [runtime]
   (let [s (inspect/snapshot runtime)
-        pool (get-in s [:codex :ws-pool])]
+        pool (get-in s [:codex :ws-pool])
+        features (:features s)
+        token-expiry (get-in s [:codex :token-expiry-seconds])]
     (str "<section id=\"dashboard\">"
-         "<p><strong>Proxy</strong> listening on 127.0.0.1:" (escape-html (:proxy-port s))
-         " · uptime " (escape-html (:uptime-seconds s)) "s</p>"
-         "<p>Backend authentication: <strong>" (if (get-in s [:codex :authenticated]) "ready" "not ready") "</strong>"
-         " · API-key guard: " (if (:api-key-auth-enabled s) "enabled" "disabled")
-         " · nREPL: " (if (:nrepl-enabled s) "enabled" "disabled") "</p>"
-         "<p>Requests: " (escape-html (:requests s))
-         " · WebSocket sessions: " (escape-html (:entries pool))
-         " (busy " (escape-html (:busy pool))
-         ", idle " (escape-html (:idle pool))
-         ", continuations " (escape-html (:with-continuation pool)) ")</p>"
-         "<p class=\"muted\">Read-only local operator view. Refreshes over SSE.</p>"
+         "<h2>Runtime</h2><dl>"
+         "<dt>Listener</dt><dd>" (escape-html (get-in s [:listener :address])) "</dd>"
+         "<dt>Uptime</dt><dd>" (escape-html (:uptime-seconds s)) " seconds</dd>"
+         "<dt>Requests served</dt><dd>" (escape-html (:requests s)) "</dd>"
+         "<dt>Request limit</dt><dd>" (escape-html (get-in s [:listener :request-limit-bytes])) " bytes</dd>"
+         "<dt>API-key guard</dt><dd>" (if (:api-key-auth-enabled features) "enabled" "disabled") "</dd>"
+         "<dt>nREPL</dt><dd>" (if (:nrepl-enabled features) "enabled" "disabled") "</dd>"
+         "<dt>Codex authentication</dt><dd>" (if (get-in s [:codex :authenticated]) "ready" "not ready") "</dd>"
+         "<dt>Token expiry</dt><dd>" (if (some? token-expiry)
+                                         (str (escape-html token-expiry) " seconds remaining")
+                                         "unavailable") "</dd></dl>"
+         "<h2>WebSocket pool</h2><dl>"
+         "<dt>Sessions</dt><dd>" (escape-html (:entries pool)) " / " (escape-html (:capacity pool))
+         " (busy " (escape-html (:busy pool)) ", idle " (escape-html (:idle pool)) ")</dd>"
+         "<dt>Continuations</dt><dd>" (escape-html (:with-continuation pool)) "</dd>"
+         "<dt>Idle TTL</dt><dd>" (escape-html (:idle-ttl-seconds pool)) " seconds</dd>"
+         "<dt>Maximum age</dt><dd>" (escape-html (:max-age-seconds pool)) " seconds</dd></dl>"
+         "<h3>Recent pooled sessions</h3>"
+         (if (seq (:sessions pool))
+           (str "<table><thead><tr><th>hash</th><th>state</th><th>age</th><th>idle</th><th>continuation</th></tr></thead><tbody>"
+                (apply str (map session-row (:sessions pool))) "</tbody></table>")
+           "<p class=\"muted\">No pooled WebSocket sessions.</p>")
+         "<p class=\"muted\">Read-only local operator view. Session identifiers are short hashes; no credentials, API keys, prompts, or upstream payloads are shown.</p>"
          "</section>")))
 
 (defn- patch-event [runtime]
@@ -45,6 +65,8 @@
   (str "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jolt LLM Proxy</title>"
        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'\">"
        "<style>body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem}"
+       "dl{display:grid;grid-template-columns:max-content 1fr;gap:.4rem 1rem}dt{font-weight:600}dd{margin:0}"
+       "table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.35rem;text-align:left}"
        ".muted{color:#666}</style>"
        "<script type=\"module\" src=\"/_llm-proxy/datastar.js\"></script></head>"
        "<body><h1>Jolt LLM Proxy</h1>"
