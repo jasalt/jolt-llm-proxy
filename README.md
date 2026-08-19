@@ -16,8 +16,8 @@ history.
 > **Status:** feature-complete and verified end-to-end against the live ChatGPT
 > subscription backend: `/v1/responses` + `/v1/chat/completions` (streaming and
 > non-streaming), WebSocket delta continuation, SSE fallback, token refresh,
-> API-key guard, and the `login`/`logout`/`usage`/`info` CLI — see
-> [`TODO.md`](./docs/TODO.md) Phase 7.
+> API-key guard, and the `login`/`logout`/`usage`/`info` CLI. Implemented
+> architectural decisions are recorded under [`docs/adr/`](./docs/adr/).
 
 ## Prerequisites
 
@@ -98,10 +98,12 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
 - **`codex.continuation`** — builds the delta request (`previous_response_id` +
   `store:false`), normalizes prior output into input items, lenient prefix match
   (assistant text matched on role only).
+- **`codex.schema`** — open, string-keyed Malli schemas that validate untrusted
+  request structure and collection bounds before normalization.
 - **`codex.translate`** — `/v1/chat/completions` ↔ `/v1/responses` translation.
-  Parses client JSON with string keys and validates it (nested type checks,
-  message/tool/item caps) before any keyword conversion; unknown top-level
-  `/v1/responses` keys pass through upstream unchanged.
+  Parses client JSON with string keys, delegates structural checks to
+  `codex.schema`, and then performs policy-aware normalization; unknown
+  top-level `/v1/responses` keys pass through upstream unchanged.
 - **`codex.cli`** — `login` (browser PKCE + headless device code), `logout`,
   `usage` (weekly allowance), `info` (JWT claim dump); ports Go `auth.go`/
   `usage.go`/`info.go`.
@@ -153,8 +155,10 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
   including brepl output loss and Jolt's missing base64url shim.
 - [`CLOJURE-CONVERGENCE.md`](./docs/CLOJURE-CONVERGENCE.md) — reviewed
   Clojure/Jolt convergence observations.
-- [`SOL-REVIEW.md`](./docs/SOL-REVIEW.md) — prioritized implementation review
-  and current remediation progress.
+- [`docs/adr/`](./docs/adr/) — accepted architectural decisions and completed
+  implementation progress.
+- [`260819-review.md`](./docs/260819-review.md) — current architecture review and
+  upcoming work.
 
 The two most dangerous gotchas: **`jolt.host/tagged-table` does not implement
 `IFn`**, so `(:write st)` on the outbound TLS stream returns `nil` silently —
