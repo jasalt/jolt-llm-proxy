@@ -17,7 +17,13 @@
     (is (= [{:role "user" :content "hello"}] (:input request)))))
 
 (deftest validates-required-chat-fields
-  (is (thrown? Throwable (translate/chat-to-responses "{}"))))
+  (is (thrown? Throwable (translate/chat-to-responses "{}")))
+  (is (thrown? Throwable
+               (translate/chat-to-responses
+                 (json/write-str {:model 1 :messages []}))))
+  (is (thrown? Throwable
+               (translate/chat-to-responses
+                 (json/write-str {:model "m" :messages ["bad"]})))))
 
 (deftest prepares-responses-request
   (let [[request model stream]
@@ -29,3 +35,11 @@
     (is (= [{:role "user" :content "hello"}] (:input request)))
     (is (not (contains? request :max_output_tokens)))
     (is (= false (:store request)))))
+
+(deftest validates-responses-shape
+  (is (thrown? Throwable
+               (translate/prepare-responses
+                 (json/write-str {:model 2 :input "hello"}))))
+  (is (thrown? Throwable
+               (translate/prepare-responses
+                 (json/write-str {:model "m" :input {}})))))

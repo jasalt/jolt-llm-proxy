@@ -98,15 +98,24 @@
   (let [chat (json/read-str (to-str raw) :key-fn keyword)
         model (:model chat)
         messages (:messages chat)]
-    (when (or (nil? model) (nil? messages) (empty? messages))
-      (throw (ex-info "model and messages are required" {})))
+    (when-not (map? chat)
+      (throw (ex-info "request body must be a JSON object" {})))
+    (when-not (and (string? model) (not= model ""))
+      (throw (ex-info "model must be a non-empty string" {})))
+    (when-not (and (vector? messages) (not (empty? messages)))
+      (throw (ex-info "messages must be a non-empty array" {})))
+    (when (> (count messages) 1000)
+      (throw (ex-info "too many messages" {:limit 1000})))
     (let [stream (:stream chat)
           instructions (atom "")
           input (atom [])]
       (doseq [value messages]
-        (when (map? value)
-          (let [role (:role value)]
-            (cond
+        (when-not (map? value)
+          (throw (ex-info "each message must be an object" {})))
+        (let [role (:role value)]
+          (when-not (string? role)
+            (throw (ex-info "message role must be a string" {})))
+          (cond
               (or (= role "system") (= role "developer"))
               (let [text (content-text (:content value))]
                 (when (not= text "")
@@ -142,8 +151,8 @@
               (= role "user")
               (swap! input conj {:role "user"
                                  :content (response-content (:content value))})
-              :else
-              (throw (ex-info (str "unsupported message role: " role) {}))))))
+            :else
+            (throw (ex-info (str "unsupported message role: " role) {})))))
       (when (= @instructions "")
         (reset! instructions "You are a helpful assistant."))
       (when (empty? @input)
@@ -191,10 +200,16 @@
   [raw]
   (let [request (json/read-str (to-str raw) :key-fn keyword)
         model (:model request)]
-    (when (nil? model)
-      (throw (ex-info "model is required" {})))
+    (when-not (map? request)
+      (throw (ex-info "request body must be a JSON object" {})))
+    (when-not (and (string? model) (not= model ""))
+      (throw (ex-info "model must be a non-empty string" {})))
     (when (not (contains? request :input))
       (throw (ex-info "input is required" {})))
+    (when-not (or (string? (:input request)) (vector? (:input request)))
+      (throw (ex-info "input must be a string or array" {})))
+    (when (and (vector? (:input request)) (> (count (:input request)) 1000))
+      (throw (ex-info "too many input items" {:limit 1000})))
     (let [request (if (string? (:input request))
                     (assoc request :input [{:role "user"
                                             :content (:input request)}])

@@ -30,7 +30,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P1 | Bound and normalize client session IDs and pool cardinality | IDs are allowlisted/clamped and the cache is capped at 128 sessions with idle LRU eviction |
 | Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
 | Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
-| Pending | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
+| In progress | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Top-level/model/messages/input types and item counts are validated; string-key parsing and deeper per-field limits remain |
 | In progress | P2 | Correct operational documentation and CLI behavior | CLI now rejects unsupported bind hosts and no longer prints the API key; broader documentation reconciliation remains |
 
 ## P0 — security and correctness
@@ -323,9 +323,14 @@ straightforward and eliminate subtle `swap!`/mutation interactions.
 
 ### 10. Validate untrusted JSON before translation
 
+**Status: partially implemented.** Both endpoints now require an object body,
+a non-empty string model, correct messages/input container types, map-shaped
+chat messages with string roles, and at most 1000 messages/input items. Parsing
+with string keys and detailed limits for nested tools/content remain open.
+
 **Locations:** `src/codex/translate.clj`, `src/codex/proxy.clj:34-47`
 
-Validation currently checks only a few fields. Examples include accepting a
+Originally validation checked only a few fields. Examples include accepting a
 non-string model, a non-vector `messages`, non-map tools, malformed content
 parts, and arbitrary nested sizes until deeper functions fail. Every JSON key
 is converted with `:key-fn keyword`; for arbitrary client-controlled keys this
