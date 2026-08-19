@@ -278,9 +278,10 @@ terminal callback and ignoring duplicates.
 
 **Status: implemented.** `codex.core` now owns the only application lifecycle
 atom. Every start creates an isolated pool and immutable runtime dependency map;
-`codex.proxy/make-handler` closes over it. HTTP POST is injectable, startup is
-transactional, server limits are explicit, and stop is idempotent. Tests prove
-that handler instances retain independent API-key configuration.
+`codex.proxy/make-handler` closes over it. HTTP POST and server start/stop are
+injectable, startup is transactional, server limits are explicit, and stop is
+idempotent. Tests prove isolated handler configuration, explicit server options,
+single-stop behavior, and cleanup after startup failure.
 
 **Locations:** `src/codex/core.clj:12`, `src/codex/proxy.clj:20`,
 `src/codex/ws.clj:313`

@@ -22,17 +22,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn start!
-  "Initialise the proxy.  Options:
-    :port      — listen port (default 8080)
-    :api-key   — proxy API key; empty string = no auth
-    :auth-path — path to auth.json (default codex.auth/default-auth-path)"
-  [& {:keys [port api-key auth-path]
-      :or {port 8080 api-key ""}}]
+  "Initialise the proxy. Production defaults can be replaced at explicit
+  dependency seams for deterministic lifecycle tests."
+  [& {:keys [port api-key auth-path store run-server stop-server]
+      :or {port 8080 api-key ""
+           run-server adapter/run-server
+           stop-server adapter/stop-server}}]
   (when @system
     (throw (ex-info "system already started" {})))
   ;; 1. Token store
   (let [auth-path (or auth-path auth/default-auth-path)
-        store     (auth/start! auth-path)]
+        store (or store (auth/start! auth-path))]
     (when-not (auth/authenticated? store)
       (throw (ex-info (str "Not authenticated — run `jolt run login` first. Path: " auth-path)
                       {})))
@@ -43,14 +43,15 @@
                    :api-key api-key}
           handler (proxy/make-handler runtime)]
       (try
-        (let [srv (adapter/run-server handler
+        (let [srv (run-server handler
                     {:port port
                      :strategy :threads
                      :worker-threads 8
                      :max-request-bytes 1048576
                      :keep-alive-timeout-ms 30000
                      :write-timeout-ms 30000})
-              running (assoc runtime :server srv :handler handler)]
+              running (assoc runtime :server srv :handler handler
+                             :stop-server stop-server)]
           (reset! system running)
           (println (str "Proxy listening on http://127.0.0.1:" port))
           (println (str "  session-id: " session-id))
@@ -70,7 +71,7 @@
     ;; Clear ownership first so repeated stop calls are harmless.
     (reset! system nil)
     (when-let [srv (:server running)]
-      (try (adapter/stop-server srv) (catch Throwable _ nil)))
+      (try ((:stop-server running) srv) (catch Throwable _ nil)))
     (let [pool (:pool running)]
       (doseq [[_ sess] @pool]
         (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
