@@ -1,6 +1,6 @@
 (ns codex.auth
   "Token store + OAuth refresh. Loads
-  `~/.config/chatgpt-openai-api-adapter/auth.json`, refreshes the access token
+  `~/.config/jolt-llm-proxy/auth.json`, refreshes the access token
   when expired, and exposes [token account-id] to the rest of the proxy.
 
   The store is an atom whose value is the credential PMap merged with :path and
@@ -20,10 +20,10 @@
 (def refresh-margin-ms (* 5 60 1000))   ; refresh if <5min left
 
 (def default-auth-path
-  (let [env (System/getenv "CHATGPT_ADAPTER_AUTH_FILE")]
+  (let [env (System/getenv "JOLT_LLM_PROXY_AUTH_FILE")]
     (if (and env (not= env ""))
       env
-      (str (or (System/getenv "HOME") ".") "/.config/chatgpt-openai-api-adapter/auth.json"))))
+      (str (or (System/getenv "HOME") ".") "/.config/jolt-llm-proxy/auth.json"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Credential file load/save

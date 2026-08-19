@@ -15,22 +15,22 @@ test independently.
 Keep a one-directional boundary:
 
 ```text
-codex.core
-  -> codex.proxy
-       -> codex.schema / codex.translate
-       -> codex.transport.sse / codex.transport.ws
+llm-proxy.core
+  -> llm-proxy.proxy
+       -> llm-proxy.schema / codex.translate
+       -> llm-proxy.transport.sse / llm-proxy.transport.ws
        -> codex.collect
 ```
 
 Responsibilities are:
 
-- `codex.proxy`: exact Ring routes, API-key guard, session normalization,
+- `llm-proxy.proxy`: exact Ring routes, API-key guard, session normalization,
   prompt-cache-key application, transport selection, and HTTP response maps;
 - `codex.translate`: Chat-to-Responses transformation, Responses normalization,
   defaults, recognized-field handling, and continuation-compatible input shape;
 - `codex.collect`: reduce common upstream events into Chat or Responses output,
   for streaming and nonstreaming clients;
-- `codex.transport.*`: produce events and own transport cleanup.
+- `llm-proxy.transport.*`: produce events and own transport cleanup.
 
 Retain the simple `cond` router while the API has four exact routes. Do not add
 Reitit solely to replace these comparisons. Retain maps and functions as the
@@ -49,6 +49,6 @@ multiple implementation requirement beyond the two transport maps.
 
 ## Evidence
 
-The extraction reduced `codex.proxy` from roughly 544 lines to about 230 lines.
+The extraction reduced `llm-proxy.proxy` from roughly 544 lines to about 230 lines.
 Replay tests live in `test/codex/collect_test.clj`; transport parser tests live
 in `test/codex/transport_sse_test.clj`.

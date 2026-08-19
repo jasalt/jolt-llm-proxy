@@ -1,4 +1,4 @@
-(ns codex.id
+(ns llm-proxy.id
   "Random identifiers used for internal sessions and OpenAI response IDs,
   plus a short hash for correlating identifiers in logs without printing the
   raw value.")

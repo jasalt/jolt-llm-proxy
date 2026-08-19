@@ -15,7 +15,7 @@ session identifiers also select retained WebSocket and continuation state.
 Adopt the following security boundary:
 
 - bind through the loopback-only Ring adapter and reject misleading non-loopback
-  `CHATGPT_ADAPTER_ADDR` hosts;
+  `JOLT_LLM_PROXY_ADDR` hosts;
 - support an optional bearer API-key guard with timing-resistant comparison;
 - never print the API key and print only a short SHA-256 hash of the generated
   startup session identifier;

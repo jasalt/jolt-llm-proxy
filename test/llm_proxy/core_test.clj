@@ -1,6 +1,6 @@
-(ns codex.core-test
+(ns llm-proxy.core-test
   (:require [clojure.test :refer [deftest is]]
-            [codex.core :as core]))
+            [llm-proxy.core :as core]))
 
 (def authenticated-store
   (atom {:access_token "token" :account_id "account"}))

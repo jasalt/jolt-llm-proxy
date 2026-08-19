@@ -1,7 +1,7 @@
-(ns codex.proxy
+(ns llm-proxy.proxy
   "Ring boundary: routing, API-key guard, session/prompt-cache key derivation,
   transport selection, and the endpoint handlers. Event collectors live in
-  `codex.collect`; outbound transports in `codex.transport.*`. Inbound Ring
+  `codex.collect`; outbound transports in `llm-proxy.transport.*`. Inbound Ring
   request/response maps are plain Clojure PMaps — use `(:headers req)` /
   `get-in` normally (NOT `jolt.host/ref-get`). The outbound `jolt.http.tls`
   stream is a tagged-table and is handled inside `codex.ws`."
@@ -11,8 +11,8 @@
             [ring-chez.sse :as sse]
             [codex.collect :as collect]
             [codex.translate :as tr]
-            [codex.transport.sse :as transport-sse]
-            [codex.transport.ws :as transport-ws]))
+            [llm-proxy.transport.sse :as transport-sse]
+            [llm-proxy.transport.ws :as transport-ws]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.

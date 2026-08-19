@@ -19,9 +19,9 @@ Both transports expose the same small map interface:
  :finalize (fn [result-meta] ...)}
 ```
 
-- `codex.transport.sse` owns outbound HTTP, one forced-refresh retry after a
+- `llm-proxy.transport.sse` owns outbound HTTP, one forced-refresh retry after a
   401, SSE parsing, and response-body cleanup.
-- `codex.transport.ws` owns acquisition, request initialization, continuation
+- `llm-proxy.transport.ws` owns acquisition, request initialization, continuation
   selection, event adaptation, and release/finalization.
 - `codex.ws` owns the RFC 6455 handshake, framing, message assembly, connection
   state, and bounded per-session pool.

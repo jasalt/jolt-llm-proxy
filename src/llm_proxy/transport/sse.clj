@@ -1,4 +1,4 @@
-(ns codex.transport.sse
+(ns llm-proxy.transport.sse
   "Outbound Codex HTTP/SSE transport. Runtime dependencies are explicit so the
   parser and retry behavior can be tested without application globals."
   (:require [clojure.string :as str]
@@ -26,7 +26,7 @@
                                   "ChatGPT-Account-Id" account-id
                                   "OpenAI-Beta" "responses=experimental"
                                   "originator" "pi"
-                                  "User-Agent" "chatgpt-openai-api-adapter/1"
+                                  "User-Agent" "jolt-llm-proxy/1"
                                   "session-id" session-id
                                   "x-client-request-id" session-id}})]
         (cond

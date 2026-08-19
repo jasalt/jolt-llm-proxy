@@ -1,4 +1,7 @@
-# jolt-codex-sub-proxy
+# jolt-llm-proxy
+
+A generic Jolt-based LLM proxy architecture with the current Codex/ChatGPT
+Subscription backend as its supported backend.
 
 > **Unofficial/private API:** this project talks to ChatGPT Subscription backend
 > endpoints that are not a stable public OpenAI API. They may change without
@@ -29,18 +32,18 @@ history.
 Verify the source and deterministic test suite before using live credentials:
 
 ```bash
-jolt -e '(require (quote codex.core))'
-jolt -M:test -m codex.test-runner
+jolt -e '(require (quote llm-proxy.core))'
+jolt -M:test -m llm-proxy.test-runner
 ```
 
 ## Usage
 
 ```bash
 # Log in (browser PKCE on localhost:1455, or headless device code):
-jolt -m codex.core login
+jolt -m llm-proxy.core login
 
-# Serve an OpenAI-compatible API (env: CHATGPT_ADAPTER_ADDR, CHATGPT_ADAPTER_API_KEY):
-CHATGPT_ADAPTER_ADDR=127.0.0.1:8090 CHATGPT_ADAPTER_API_KEY=my-key jolt -m codex.core serve
+# Serve an OpenAI-compatible API (env: JOLT_LLM_PROXY_ADDR, JOLT_LLM_PROXY_API_KEY):
+JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve
 
 curl -H 'Authorization: Bearer my-key' http://127.0.0.1:8090/v1/models
 curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
@@ -49,14 +52,14 @@ curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
      http://127.0.0.1:8090/v1/responses
 
 # Account status:
-jolt -m codex.core usage   # weekly Codex allowance
-jolt -m codex.core info     # credentials + JWT claims
-jolt -m codex.core logout
+jolt -m llm-proxy.core usage   # weekly Codex allowance
+jolt -m llm-proxy.core info     # credentials + JWT claims
+jolt -m llm-proxy.core logout
 ```
 
-`CHATGPT_ADAPTER_ADDR` accepts only `127.0.0.1:<port>` or
+`JOLT_LLM_PROXY_ADDR` accepts only `127.0.0.1:<port>` or
 `localhost:<port>` because the current Ring adapter is loopback-only. With no
-`CHATGPT_ADAPTER_API_KEY`, every local process can spend the logged-in account's
+`JOLT_LLM_PROXY_API_KEY`, every local process can spend the logged-in account's
 allowance. Set a strong key on shared machines. Never put the proxy directly on
 an untrusted network; use an authenticating TLS reverse proxy if remote access
 is unavoidable.
@@ -64,8 +67,8 @@ is unavoidable.
 Requests carrying an `X-Session-Id` (or `X-Prompt-Cache-Key`) header are routed
 over pooled WebSocket connections with multi-turn delta continuation; requests
 without one fall back to plain SSE. Credentials live at
-`~/.config/chatgpt-openai-api-adapter/auth.json` (override with
-`CHATGPT_ADAPTER_AUTH_FILE`), shared with the Go original. The directory and
+`~/.config/jolt-llm-proxy/auth.json` (override with
+`JOLT_LLM_PROXY_AUTH_FILE`), shared with the Go original. The directory and
 file are maintained with modes `0700` and `0600`; startup tightens an existing
 credential file before reading it.
 
@@ -81,7 +84,7 @@ outbound TLS + the hand-rolled RFC 6455 WebSocket client use
 ## Architecture
 
 ```
-client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.proxy/make-handler
+client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ llm-proxy.proxy/make-handler
                                                           │  translate (chat↔responses)
                                                           │  continuation (delta + prefix)
                                                           ▼
@@ -91,34 +94,34 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
                        wss://chatgpt.com/backend-api/codex/responses
 ```
 
-- **`codex.auth`** — loads `~/.config/chatgpt-openai-api-adapter/auth.json`,
+- **`codex.auth`** — loads `~/.config/jolt-llm-proxy/auth.json`,
   refreshes the OAuth access token, exposes `[token account-id]`.
 - **`codex.ws`** — TLS dial (`jolt.http.tls/tls-connect`), WS upgrade handshake,
   masked client frames, message defragmentation, event reader, per-session pool.
 - **`codex.continuation`** — builds the delta request (`previous_response_id` +
   `store:false`), normalizes prior output into input items, lenient prefix match
   (assistant text matched on role only).
-- **`codex.schema`** — open, string-keyed Malli schemas that validate untrusted
+- **`llm-proxy.schema`** — open, string-keyed Malli schemas that validate untrusted
   request structure and collection bounds before normalization.
 - **`codex.translate`** — `/v1/chat/completions` ↔ `/v1/responses` translation.
   Parses client JSON with string keys, delegates structural checks to
-  `codex.schema`, and then performs policy-aware normalization; unknown
+  `llm-proxy.schema`, and then performs policy-aware normalization; unknown
   top-level `/v1/responses` keys pass through upstream unchanged.
 - **`codex.cli`** — `login` (browser PKCE + headless device code), `logout`,
   `usage` (weekly allowance), `info` (JWT claim dump); ports Go `auth.go`/
   `usage.go`/`info.go`.
 - **`codex.collect`** — event collectors that reduce upstream events into
   OpenAI-shaped output (chat + responses, streaming and non-streaming).
-- **`codex.proxy`** — Ring boundary: routes, API-key guard, `prompt_cache_key`,
+- **`llm-proxy.proxy`** — Ring boundary: routes, API-key guard, `prompt_cache_key`,
   transport selection, endpoint handlers. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
   `request->ring` builds them with `{}`/`assoc`): use `(:headers req)`,
   `get-in`, `assoc` normally — do **not** use `jolt.host/ref-get` there (it
   returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the
   opposite: a `jolt.host/tagged-table`, so read `:write`/`:read`/`:close` with
   `jolt.host/ref-get`, not `(:write st)`. See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §1.
-- **`codex.core`** — sole lifecycle owner for `start!`/`stop!`. Each start
+- **`llm-proxy.core`** — sole lifecycle owner for `start!`/`stop!`. Each start
   creates an isolated token store, session pool, and handler from
-  `codex.proxy/make-handler`; startup cleanup is transactional and stop is
+  `llm-proxy.proxy/make-handler`; startup cleanup is transactional and stop is
   idempotent.
 
 ## Development workflow (REPL-driven)
@@ -132,7 +135,7 @@ ss -ltn | grep 7888
 cat .nrepl-port
 
 # 2. Iterate. Live-reload a namespace into the running proxy:
-brepl -p 7888 '(require (quote codex.proxy) :reload)'
+brepl -p 7888 '(require (quote llm-proxy.proxy) :reload)'
 
 # 3. Evaluate a file:
 brepl -f examples/ws_handshake.clj

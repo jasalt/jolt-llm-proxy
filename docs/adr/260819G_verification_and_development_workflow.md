@@ -17,7 +17,7 @@ Maintain tests under `test/codex/` and run them through a small explicit
 `clojure.test` runner:
 
 ```console
-jolt -M:test -m codex.test-runner
+jolt -M:test -m llm-proxy.test-runner
 ```
 
 The runner throws when any test fails. CI installs the pinned tested Jolt

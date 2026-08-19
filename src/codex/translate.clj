@@ -12,7 +12,7 @@
   keywordized recursively (bounded by item count, body size, and a nesting
   cap) so `codex.continuation` keeps matching prefixes."
   (:require [clojure.data.json :as json]
-            [codex.schema :as schema]))
+            [llm-proxy.schema :as schema]))
 
 (def max-nesting-depth 32)
 

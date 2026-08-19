@@ -14,10 +14,10 @@ a WebSocket session pool, the Ring handler, and the HTTP server.
 
 ## Decision
 
-`codex.core` is the sole application lifecycle owner.
+`llm-proxy.core` is the sole application lifecycle owner.
 
 Each `start!` creates an isolated token store, session pool, session identifier,
-and immutable runtime dependency map. `codex.proxy/make-handler` closes over
+and immutable runtime dependency map. `llm-proxy.proxy/make-handler` closes over
 that runtime; production namespaces do not copy the system into another global.
 Server start/stop functions and key lifecycle inputs are injectable for tests.
 

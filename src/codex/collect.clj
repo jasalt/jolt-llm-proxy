@@ -5,12 +5,12 @@
   reducers plus the SSE streaming wrappers around them.
 
   Consumed events are `{:name <event-name> :data <parsed PMap>}` as produced by
-  the `codex.transport.*` sources. Inbound Ring request/response maps are plain
+  the `llm-proxy.transport.*` sources. Inbound Ring request/response maps are plain
   Clojure PMaps — use `(:headers req)` normally (NOT `jolt.host/ref-get`)."
   (:require [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
-            [codex.id :as id]))
+            [llm-proxy.id :as id]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared helpers

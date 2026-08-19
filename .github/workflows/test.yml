@@ -23,7 +23,9 @@ jobs:
           sudo mv jolt /usr/local/bin/jolt
       - name: Load production namespaces
         run: >-
-          jolt -e '(doseq [n (quote [codex.auth codex.cli codex.collect
-          codex.continuation codex.translate codex.ws codex.proxy codex.core])] (require n))'
+          jolt -e '(doseq [n (quote [llm-proxy.core llm-proxy.id llm-proxy.proxy
+          llm-proxy.schema llm-proxy.transport.sse llm-proxy.transport.ws
+          codex.auth codex.cli codex.collect codex.continuation codex.translate
+          codex.ws])] (require n))'
       - name: Run unit tests
-        run: jolt -M:test -m codex.test-runner
+        run: jolt -M:test -m llm-proxy.test-runner

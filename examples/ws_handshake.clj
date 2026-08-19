@@ -6,7 +6,7 @@
 (def tt (jolt.host/tagged-table :jolt/tls-stream))
 (jolt.host/ref-put! tt :write (fn [_ _] :w))
 (println "convergence: (:write tt) =" (:write tt) "| (ref-get tt :write) =" ((jolt.host/ref-get tt :write) tt nil))
-(def auth (json/read-str (slurp "/home/user/.config/chatgpt-openai-api-adapter/auth.json") :key-fn keyword))
+(def auth (json/read-str (slurp "/home/user/.config/jolt-llm-proxy/auth.json") :key-fn keyword))
 (def st (tls/tls-connect "chatgpt.com" 443 false 20000 20000))
 (def wfn (jolt.host/ref-get st :write))
 (def rfn (jolt.host/ref-get st :read))
@@ -16,7 +16,7 @@
               "Authorization: Bearer " (:access_token auth) "\r\n"
               "ChatGPT-Account-Id: " (:account_id auth) "\r\n"
               "OpenAI-Beta: responses_websockets=2026-02-06\r\noriginator: pi\r\n"
-              "User-Agent: chatgpt-openai-api-adapter/1\r\n"
+              "User-Agent: jolt-llm-proxy/1\r\n"
               "session-id: wshtest01\r\nx-client-request-id: wshtest01\r\n\r\n"))
 (wfn st (.getBytes req "ISO-8859-1"))
 (Thread/sleep 1500)

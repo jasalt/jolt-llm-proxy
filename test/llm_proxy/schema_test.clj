@@ -1,7 +1,7 @@
-(ns codex.schema-test
+(ns llm-proxy.schema-test
   (:require [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
-            [codex.schema :as schema]))
+            [llm-proxy.schema :as schema]))
 
 (deftest validates-project-request-schemas
   (is (m/validate schema/chat-request

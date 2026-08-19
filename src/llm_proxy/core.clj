@@ -1,12 +1,12 @@
-(ns codex.core
+(ns llm-proxy.core
   "Server startup, runtime state, and CLI entry point."
   (:require [clojure.string :as str]
             [ring-chez.adapter :as adapter]
             [codex.auth :as auth]
             [codex.ws :as ws]
-            [codex.proxy :as proxy]
+            [llm-proxy.proxy :as proxy]
             [codex.cli :as cli]
-            [codex.id :as id]))
+            [llm-proxy.id :as id]))
 
 ;; ---------------------------------------------------------------------------
 ;; System atom
@@ -84,7 +84,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- env
-  "Read env var with fallback."
+  "Read a project environment variable with a fallback."
   [key fallback]
   (or (System/getenv key) fallback))
 
@@ -92,12 +92,12 @@
   (let [command (if (seq args) (first args) "serve")]
     (case command
       "serve"
-      (let [addr    (env "CHATGPT_ADAPTER_ADDR" "127.0.0.1:8080")
-            api-key (env "CHATGPT_ADAPTER_API_KEY" "")
+      (let [addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
+            api-key (env "JOLT_LLM_PROXY_API_KEY" "")
             ;; ring-chez-adapter is loopback-only; reject misleading hosts.
             [host port-str] (str/split addr #":" 2)
             _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
-                (throw (ex-info "CHATGPT_ADAPTER_ADDR must use 127.0.0.1 or localhost"
+                (throw (ex-info "JOLT_LLM_PROXY_ADDR must use 127.0.0.1 or localhost"
                                 {:address addr})))
             port (if port-str (Integer/parseInt port-str) 8080)]
         (start! :port port :api-key api-key)

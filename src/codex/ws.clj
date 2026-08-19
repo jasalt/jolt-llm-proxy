@@ -167,7 +167,7 @@
                  "ChatGPT-Account-Id: " account-id "\r\n"
                  "OpenAI-Beta: responses_websockets=2026-02-06\r\n"
                  "originator: pi\r\n"
-                 "User-Agent: chatgpt-openai-api-adapter/1\r\n"
+                 "User-Agent: jolt-llm-proxy/1\r\n"
                  "session-id: " session-id "\r\n"
                  "x-client-request-id: " session-id "\r\n"
                  "\r\n")
@@ -446,7 +446,7 @@
               :release (releaser pl session-id (:conn sess))})))))))
 
 ;; ---------------------------------------------------------------------------
-;; Continuation state accessors (per-connection, used by codex.proxy)
+;; Continuation state accessors (per-connection, used by llm-proxy.proxy)
 ;; ---------------------------------------------------------------------------
 
 (defn get-continuation [conn] @(:continuation conn))

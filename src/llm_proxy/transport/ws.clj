@@ -1,4 +1,4 @@
-(ns codex.transport.ws
+(ns llm-proxy.transport.ws
   "Pooled WebSocket event-source lifecycle and continuation state."
   (:require [clojure.data.json :as json]
             [codex.auth :as auth]

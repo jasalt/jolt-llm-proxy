@@ -1,6 +1,6 @@
-(ns codex.proxy-test
+(ns llm-proxy.proxy-test
   (:require [clojure.test :refer [deftest is]]
-            [codex.proxy :as proxy]))
+            [llm-proxy.proxy :as proxy]))
 
 (deftest normalizes-session-identifiers
   (is (= "abc_1:two" (proxy/normalize-session-id " abc_1:two ")))

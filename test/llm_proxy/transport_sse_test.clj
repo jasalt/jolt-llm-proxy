@@ -1,6 +1,6 @@
-(ns codex.transport-sse-test
+(ns llm-proxy.transport-sse-test
   (:require [clojure.test :refer [deftest is]]
-            [codex.transport.sse :as transport]))
+            [llm-proxy.transport.sse :as transport]))
 
 (deftest parses-named-and-inferred-events
   (let [events (atom [])

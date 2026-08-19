@@ -1,4 +1,4 @@
-(ns codex.schema
+(ns llm-proxy.schema
   "Declarative, string-keyed request-shape schemas.
 
   These schemas run immediately after JSON parsing and before any client key is

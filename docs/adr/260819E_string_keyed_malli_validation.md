@@ -20,7 +20,7 @@ keys.
 
 ## Decision
 
-Parse request JSON with string keys, then validate it in `codex.schema` before
+Parse request JSON with string keys, then validate it in `llm-proxy.schema` before
 normalization. Malli is pinned to commit
 `a74e3b45efa30b3bcdb2e997f337c71614eba3c5`.
 
