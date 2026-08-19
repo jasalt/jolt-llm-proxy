@@ -83,7 +83,7 @@
             (when nrepl-port
               (println (str "  nREPL: 127.0.0.1:" nrepl-port)))
             (when dashboard
-              (println "  dashboard: http://127.0.0.1:" port "/_llm-proxy/"))
+              (println (str "  dashboard: http://127.0.0.1:" port "/_llm-proxy/")))
             running)
           (catch Throwable e
             (when-let [stop-nrepl (:stop-nrepl @started)]
