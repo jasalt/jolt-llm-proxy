@@ -14,13 +14,8 @@
             [codex.continuation :as cont]
             [codex.translate :as tr]))
 
-;; ---------------------------------------------------------------------------
-;; Config (populated by codex.core/start!)
-;; ---------------------------------------------------------------------------
-
-(defonce system (atom nil))
-
-(defn set-system! [m] (reset! system m))
+;; Runtime dependencies are passed explicitly through a handler closure made by
+;; `make-handler`; this namespace owns no application lifecycle state.
 
 (def upstream-responses-url "https://chatgpt.com/backend-api/codex/responses")
 
@@ -72,12 +67,11 @@
         key
         (subs key 0 prompt-cache-key-max-length)))))
 
-(defn resolve-session-id [req]
-  (let [default (:session-id @system)]
-    (or (some (fn [h]
-                (normalize-session-id (get-in req [:headers h] "")))
-              ["x-session-id" "x-prompt-cache-key"])
-        default)))
+(defn resolve-session-id [runtime req]
+  (or (some (fn [h]
+              (normalize-session-id (get-in req [:headers h] "")))
+            ["x-session-id" "x-prompt-cache-key"])
+      (:session-id runtime)))
 
 (defn apply-prompt-cache-key [request key]
   (if (or (= key "") (contains? request :prompt_cache_key))
@@ -88,8 +82,8 @@
 ;; API-key guard
 ;; ---------------------------------------------------------------------------
 
-(defn require-api-key [req handler-fn]
-  (let [api-key (:api-key @system)]
+(defn require-api-key [runtime req handler-fn]
+  (let [api-key (:api-key runtime)]
     (if (= api-key "")
       (handler-fn req)
       (let [auth (get-in req [:headers "authorization"] "")
@@ -123,12 +117,13 @@
 ;; SSE upstream + reader
 ;; ---------------------------------------------------------------------------
 
-(defn upstream-sse [body session-id]
-  (let [store (:store @system)
+(defn upstream-sse [runtime body session-id]
+  (let [store (:store runtime)
+        http-post (or (:http-post runtime) http/post)
         payload (json/write-str body)]
     (loop [attempt 0]
       (let [[token account-id] (auth/token store :force (= attempt 1))
-            resp (http/post upstream-responses-url
+            resp (http-post upstream-responses-url
                     {:body payload
                      :content-type "application/json"
                      :accept "text/event-stream"
@@ -197,9 +192,9 @@
           (do (ws/clear-continuation! conn)
               [acq full-body false]))))))
 
-(defn ws-source [full-body session-id for-chat]
-  (let [store (:store @system)
-        pool (:pool @system)
+(defn ws-source [runtime full-body session-id for-chat]
+  (let [store (:store runtime)
+        pool (:pool runtime)
         header-builder (fn [] (auth/token store))
         [acq request-body used-delta] (acquire-ws pool full-body session-id header-builder)]
     (try
@@ -230,24 +225,24 @@
         ((:release acq) false)
         (throw e)))))
 
-(defn sse-source [request session-id]
-  (let [in (upstream-sse request session-id)]
+(defn sse-source [runtime request session-id]
+  (let [in (upstream-sse runtime request session-id)]
     {:read (fn [emit] (read-sse in emit))
      :finalize (fn [_] (try (when (instance? java.io.Closeable in)
                               (.close ^java.io.Closeable in))
                             (catch Throwable _ nil)))}))
 
-(defn open-event-source [request session-id for-chat]
-  (let [pool (:pool @system)
-        default-session (:session-id @system)]
+(defn open-event-source [runtime request session-id for-chat]
+  (let [pool (:pool runtime)
+        default-session (:session-id runtime)]
     (if (and pool (not= session-id "") (not= session-id default-session))
       (try
-        (ws-source request session-id for-chat)
+        (ws-source runtime request session-id for-chat)
         (catch Throwable e
           (println "websocket transport unavailable, falling back to SSE:"
                    (.getMessage ^Throwable e))
-          (sse-source request session-id)))
-      (sse-source request session-id))))
+          (sse-source runtime request session-id)))
+      (sse-source runtime request session-id))))
 
 ;; ---------------------------------------------------------------------------
 ;; Collectors: chat
@@ -571,13 +566,13 @@
 ;; Handlers
 ;; ---------------------------------------------------------------------------
 
-(defn chat [req]
+(defn chat [runtime req]
   (let [raw (slurp-body req)
         parsed (try (tr/chat-to-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
       (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
-      (let [session-result (try (resolve-session-id req)
+      (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)
           (write-openai-error 400 "invalid_session_id"
@@ -585,7 +580,7 @@
           (let [[request model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
-                src (open-event-source request session-id true)]
+                src (open-event-source runtime request session-id true)]
         (if stream
           (let [ch (async/chan)]
             (async/thread
@@ -613,13 +608,13 @@
              :headers {"Content-Type" "application/json"}
              :body (json/write-str response)}))))))))
 
-(defn responses [req]
+(defn responses [runtime req]
   (let [raw (slurp-body req)
         parsed (try (tr/prepare-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
       (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
-      (let [session-result (try (resolve-session-id req)
+      (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)
           (write-openai-error 400 "invalid_session_id"
@@ -627,7 +622,7 @@
           (let [[request _model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
-                src (open-event-source request session-id false)]
+                src (open-event-source runtime request session-id false)]
         (if stream
           (let [ch (async/chan)]
             (async/thread
@@ -654,14 +649,20 @@
 ;; Top-level handler (var, so redefs are live via run-server #'handler)
 ;; ---------------------------------------------------------------------------
 
-(defn app [req]
+(defn app [runtime req]
   (let [method (:request-method req)
         uri (:uri req)]
     (cond
       (and (= method :get) (= uri "/health")) (health)
-      (and (= method :get) (= uri "/v1/models")) (require-api-key req models)
-      (and (= method :post) (= uri "/v1/chat/completions")) (require-api-key req chat)
-      (and (= method :post) (= uri "/v1/responses")) (require-api-key req responses)
+      (and (= method :get) (= uri "/v1/models"))
+      (require-api-key runtime req models)
+      (and (= method :post) (= uri "/v1/chat/completions"))
+      (require-api-key runtime req #(chat runtime %))
+      (and (= method :post) (= uri "/v1/responses"))
+      (require-api-key runtime req #(responses runtime %))
       :else (write-openai-error 404 "not_found" "Not found"))))
 
-(def handler #'app)
+(defn make-handler
+  "Build an isolated Ring handler from explicit runtime dependencies."
+  [runtime]
+  (fn [req] (app runtime req)))

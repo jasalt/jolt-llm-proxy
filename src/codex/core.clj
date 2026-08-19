@@ -44,37 +44,45 @@
     (when-not (auth/authenticated? store)
       (throw (ex-info (str "Not authenticated — run `jolt run login` first. Path: " auth-path)
                       {})))
-    ;; 2. Populate proxy/system so handlers can access store + pool + config.
+    ;; Each start owns an isolated pool and an explicit handler dependency map.
     (let [session-id (random-session-id)
-          pool      ws/pool
-          _         (proxy/set-system! {:store store
-                                        :pool  pool
-                                        :server nil  ; filled below
-                                        :session-id session-id
-                                        :api-key api-key})
-          ;; 3. Start HTTP server — pass #'handler for live reload (R3).
-          srv       (adapter/run-server #'proxy/handler
-                      {:port port
-                       :strategy :threads
-                       :worker-threads 8})]
-      ;; Update system with the running server handle.
-      (swap! proxy/system assoc :server srv)
-      (reset! system @proxy/system)
-      (println (str "Proxy listening on http://127.0.0.1:" port))
-      (println (str "  session-id: " session-id))
-      (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
-      @system)))
+          pool (atom {})
+          runtime {:store store :pool pool :session-id session-id
+                   :api-key api-key}
+          handler (proxy/make-handler runtime)]
+      (try
+        (let [srv (adapter/run-server handler
+                    {:port port
+                     :strategy :threads
+                     :worker-threads 8
+                     :max-request-bytes 1048576
+                     :keep-alive-timeout-ms 30000
+                     :write-timeout-ms 30000})
+              running (assoc runtime :server srv :handler handler)]
+          (reset! system running)
+          (println (str "Proxy listening on http://127.0.0.1:" port))
+          (println (str "  session-id: " session-id))
+          (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
+          running)
+        (catch Throwable e
+          (doseq [[_ sess] @pool]
+            (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
+          (reset! pool {})
+          (reset! system nil)
+          (throw e))))))
 
 (defn stop!
   "Shut down the server, close pooled WS connections, clear system."
   []
-  (when-let [srv (:server @system)]
-    (try (adapter/stop-server srv) (catch Throwable _ nil))
-    (doseq [[_ sess] @ws/pool]
-      (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
-    (reset! ws/pool {})
-    (reset! proxy/system nil)
+  (when-let [running @system]
+    ;; Clear ownership first so repeated stop calls are harmless.
     (reset! system nil)
+    (when-let [srv (:server running)]
+      (try (adapter/stop-server srv) (catch Throwable _ nil)))
+    (let [pool (:pool running)]
+      (doseq [[_ sess] @pool]
+        (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
+      (reset! pool {}))
     (println "Proxy stopped.")))
 
 ;; ---------------------------------------------------------------------------

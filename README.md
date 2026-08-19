@@ -81,7 +81,7 @@ outbound TLS + the hand-rolled RFC 6455 WebSocket client use
 ## Architecture
 
 ```
-client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.proxy/handler
+client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.proxy/make-handler
                                                           │  translate (chat↔responses)
                                                           │  continuation (delta + prefix)
                                                           ▼
@@ -109,10 +109,10 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
   returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the
   opposite: a `jolt.host/tagged-table`, so read `:write`/`:read`/`:close` with
   `jolt.host/ref-get`, not `(:write st)`. See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §1.
-- **`codex.core`** — `start!`/`stop!`, persistent state (token store, session
-  pool). `run-server` called with `#'codex.proxy/handler` so live reload via
-  `brepl eval -e '(require (quote codex.proxy) :reload)'` picks up redefs
-  without restarting the HTTP server.
+- **`codex.core`** — sole lifecycle owner for `start!`/`stop!`. Each start
+  creates an isolated token store, session pool, and handler from
+  `codex.proxy/make-handler`; startup cleanup is transactional and stop is
+  idempotent.
 
 ## Development workflow (REPL-driven)
 

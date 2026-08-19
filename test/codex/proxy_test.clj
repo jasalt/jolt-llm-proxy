@@ -10,11 +10,16 @@
               (catch Throwable e (:type (ex-data e)))))))
 
 (deftest api-key-guard
-  (let [old @proxy/system
+  (let [runtime {:api-key "secret"}
         ok (fn [_] {:status 204})]
-    (try
-      (proxy/set-system! {:api-key "secret"})
-      (is (= 401 (:status (proxy/require-api-key {:headers {}} ok))))
-      (is (= 204 (:status (proxy/require-api-key
-                            {:headers {"authorization" "Bearer secret"}} ok))))
-      (finally (proxy/set-system! old)))))
+    (is (= 401 (:status (proxy/require-api-key runtime {:headers {}} ok))))
+    (is (= 204 (:status (proxy/require-api-key
+                          runtime
+                          {:headers {"authorization" "Bearer secret"}} ok))))))
+
+(deftest handler-instances-have-isolated-configuration
+  (let [open (proxy/make-handler {:api-key "" :session-id "one"})
+        guarded (proxy/make-handler {:api-key "secret" :session-id "two"})
+        request {:request-method :get :uri "/v1/models" :headers {}}]
+    (is (= 200 (:status (open request))))
+    (is (= 401 (:status (guarded request))))))
