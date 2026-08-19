@@ -28,7 +28,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P0 | Report chat stream failures as failures | Failed streams now emit an error, never a successful stop chunk, and finalize with `:completed false` |
 | Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
 | In progress | P1 | Bound and normalize client session IDs and pool cardinality | IDs are now allowlisted and clamped to 64 characters; pool cardinality and timer consolidation remain pending |
-| Pending | P1 | Harden OAuth callback handling and cleanup | A wrong-state request currently aborts a valid login; HTML errors are unescaped |
+| Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
 | Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
 | Pending | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
 | Pending | P2 | Correct operational documentation and CLI behavior | Address handling, test claims, and TODO state do not match the source |
@@ -238,9 +238,14 @@ between mutually untrusted clients.
 
 ### 7. Harden the OAuth callback
 
+**Status: implemented.** The callback now requires the expected GET path,
+wrong-state probes cannot consume the pending login, browser HTML contains no
+provider/exception text, and callback server shutdown is guaranteed by
+`finally`. The pinned adapter is loopback-only.
+
 **Locations:** `src/codex/cli.clj:39-139`
 
-Useful PKCE protections are present, but callback handling has several gaps:
+Useful PKCE protections were present, but callback handling had several gaps:
 
 - Any request with a missing/wrong state delivers an error into the one-shot
   promise. A stray request, browser prefetch, or deliberate localhost request

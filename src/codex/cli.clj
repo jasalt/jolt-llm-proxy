@@ -80,13 +80,19 @@
                      (deliver result v)
                      nil)]
       (cond
+        (or (not= (:request-method req) :get)
+            (not= (:uri req) "/auth/callback"))
+        (respond 404 "Not found")
+
         (not= (get q "state") state)
-        (do (deliver! {:error "OAuth state mismatch"}) (respond 400 "OAuth state mismatch"))
+        ;; A browser probe or unrelated localhost request must not consume the
+        ;; one valid callback opportunity.
+        (respond 400 "OAuth state mismatch")
 
         (not (empty? (get q "error")))
         (let [msg (str "OAuth failed: " (get q "error_description"))]
           (deliver! {:error msg})
-          (respond 200 (str "<h1>Login failed</h1><p>" msg "</p>")))
+          (respond 200 "<h1>Login failed</h1><p>Return to the terminal.</p>"))
 
         (empty? (get q "code"))
         (respond 400 "Missing authorization code")
@@ -104,7 +110,7 @@
             (respond 200 "<h1>Login successful</h1><p>You can close this window.</p>"))
           (catch Throwable t
             (deliver! {:error (.getMessage t)})
-            (respond 200 (str "<h1>Login failed</h1><p>" (.getMessage t) "</p>"))))))))
+            (respond 200 "<h1>Login failed</h1><p>Return to the terminal.</p>")))))))
 
 (defn browser-login
   "PKCE browser login: start a local callback server on 127.0.0.1:1455, print
@@ -128,12 +134,14 @@
                       "&codex_cli_simplified_flow=true"
                       "&originator=pi")
         deadline (+ (System/currentTimeMillis) (* 5 60 1000))
-        outcome (loop []
-                  (cond
-                    (realized? result) @result
-                    (>= (System/currentTimeMillis) deadline) {:error "OAuth login timed out"}
-                    :else (do (Thread/sleep 500) (recur))))]
-    (try (adapter/stop-server server) (catch Throwable _ nil))
+        outcome (try
+                  (loop []
+                    (cond
+                      (realized? result) @result
+                      (>= (System/currentTimeMillis) deadline) {:error "OAuth login timed out"}
+                      :else (do (Thread/sleep 500) (recur))))
+                  (finally
+                    (adapter/stop-server server)))]
     (if-let [err (:error outcome)]
       (throw (ex-info err {}))
       (:cred outcome))))
@@ -327,7 +335,7 @@
           cred @store
           path (:path cred)
           payload (auth/decode-jwt-payload token)
-          auth-claim (get payload :https://api.openai.com/auth)
+          auth-claim (get payload (keyword "https://api.openai.com/auth"))
           line (fn [k v] (println (format "%-18s%s" (str (if (keyword? k) (name k) k) ":") v)))]
       (println "ChatGPT / OpenAI Codex session")
       (println (apply str (repeat 39 "=")))

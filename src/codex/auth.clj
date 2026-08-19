@@ -115,7 +115,7 @@
   "Extract `chatgpt_account_id` from the JWT (matches `auth.json`'s account_id)."
   [token]
   (get-in (decode-jwt-payload token)
-          [:https://api.openai.com/auth :chatgpt_account_id]))
+          [(keyword "https://api.openai.com/auth") :chatgpt_account_id]))
 
 (defn jwt-expiry-ms
   "Unix-ms expiry from the JWT `exp` claim (seconds), falling back to +1h."
