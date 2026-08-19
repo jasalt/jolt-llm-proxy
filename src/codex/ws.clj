@@ -18,6 +18,7 @@
 (def ws-url "wss://chatgpt.com/backend-api/codex/responses")
 (def ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 (def ws-max-message 67108864) ; 64 MiB
+(def ws-max-handshake-bytes 65536)
 (def ws-session-max-age-ms (* 55 60 1000))
 (def ws-idle-ttl-ms (* 5 60 1000))
 (def ws-max-pooled-sessions 128)
@@ -39,19 +40,6 @@
   (let [d (java.security.MessageDigest/getInstance "SHA-1")]
     (.update d (.getBytes (str key ws-guid) "UTF-8"))
     (.encodeToString (java.util.Base64/getEncoder) (.digest d))))
-
-;; ---------------------------------------------------------------------------
-;; Byte helpers
-;; ---------------------------------------------------------------------------
-
-(defn- cat-bytes
-  "Concatenate two byte arrays."
-  [a b]
-  (let [n (+ (alength a) (alength b))
-        out (byte-array n)]
-    (System/arraycopy a 0 out 0 (alength a))
-    (System/arraycopy b 0 out (alength a) (alength b))
-    out))
 
 ;; ---------------------------------------------------------------------------
 ;; Inbound byte buffer (accumulates rfn chunks, consumed by frame parser)
@@ -191,6 +179,9 @@
               (throw (ex-info "ws: no handshake response (connection closed)"
                               {:session-id session-id})))
             (.write acc chunk 0 (alength chunk))
+            (when (> (.size acc) ws-max-handshake-bytes)
+              (throw (ex-info "ws: handshake headers exceed 64 KiB"
+                              {:limit ws-max-handshake-bytes})))
             (let [b (.toByteArray acc)
                   s (String. b "ISO-8859-1")]
               (if (str/includes? s "\r\n\r\n")
@@ -232,6 +223,7 @@
         b1 (buf-take-byte conn)
         fin (not= 0 (bit-and b0 0x80))
         opcode (bit-and b0 0x0F)
+        rsv (bit-and b0 0x70)
         masked (not= 0 (bit-and b1 0x80))
         len0 (bit-and b1 0x7F)
         [len mask] (cond
@@ -247,6 +239,10 @@
                         (when masked (buf-take! conn 4))])
                      :else
                      [len0 (when masked (buf-take! conn 4))])]
+    (when (not= rsv 0)
+      (throw (ex-info "ws: unsupported reserved bits" {:rsv rsv})))
+    (when (and (#{0x8 0x9 0xA} opcode) (or (not fin) (> len 125)))
+      (throw (ex-info "ws: invalid control frame" {:opcode opcode :fin fin :len len})))
     (when (> len ws-max-message)
       (throw (ex-info "ws message exceeds 64 MiB" {:len len})))
     (let [payload (buf-take! conn len)]
@@ -258,25 +254,43 @@
           [opcode out fin])
         [opcode payload fin]))))
 
+(defn- append-fragment! [acc payload]
+  (when (> (+ (.size acc) (alength payload)) ws-max-message)
+    (throw (ex-info "ws message exceeds 64 MiB"
+                    {:len (+ (.size acc) (alength payload))})))
+  (.write acc payload 0 (alength payload))
+  acc)
+
 (defn read-message
-  "Read one complete (defragmented) text/binary message. Handles control frames
-  internally (ping -> pong, pong ignored, close -> sentinel)."
+  "Read one complete (defragmented) text/binary message. Aggregate size is
+  bounded and control frames are handled between fragments."
   [conn]
-  (loop [acc nil]
+  (loop [acc nil message-type nil]
     (let [[opcode payload fin] (read-frame conn)]
       (cond
-        (= opcode 0x8)  {:type :close}
-        (= opcode 0x9)  (do (write-frame conn 0xA payload) (recur acc))
-        (= opcode 0xA)  (recur acc)
+        (= opcode 0x8) {:type :close}
+        (= opcode 0x9) (do (write-frame conn 0xA payload)
+                           (recur acc message-type))
+        (= opcode 0xA) (recur acc message-type)
+
         (or (= opcode 0x1) (= opcode 0x2))
-        (if fin
-          {:type (if (= opcode 0x1) :text :binary) :data payload}
-          (recur (if acc (cat-bytes acc payload) payload)))
-        (= opcode 0x0)
-        (let [newacc (if acc (cat-bytes acc payload) payload)]
+        (if acc
+          (throw (ex-info "ws: new data frame before fragmented message ended" {}))
           (if fin
-            {:type :text :data newacc}
-            (recur newacc)))
+            {:type (if (= opcode 0x1) :text :binary) :data payload}
+            (let [out (java.io.ByteArrayOutputStream.)]
+              (append-fragment! out payload)
+              (recur out (if (= opcode 0x1) :text :binary)))))
+
+        (= opcode 0x0)
+        (if (nil? acc)
+          (throw (ex-info "ws: continuation without initial data frame" {}))
+          (do
+            (append-fragment! acc payload)
+            (if fin
+              {:type message-type :data (.toByteArray acc)}
+              (recur acc message-type))))
+
         :else
         (throw (ex-info (str "ws: unexpected opcode 0x"
                              (Integer/toHexString opcode)) {}))))))

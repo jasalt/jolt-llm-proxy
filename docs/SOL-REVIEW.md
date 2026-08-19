@@ -349,9 +349,14 @@ returned directly from generic exception text.
 
 ### 11. Enforce aggregate WebSocket message limits and protocol invariants
 
+**Status: implemented.** Fragmented messages now use a linear accumulator with
+an aggregate 64 MiB cap. Upgrade headers are capped at 64 KiB. Reserved bits,
+control-frame FIN/size rules, continuation order, and overlapping fragmented
+messages are validated before accepting payloads.
+
 **Locations:** `src/codex/ws.clj:222-310`
 
-`ws-max-message` is checked per frame, not against the accumulated fragmented
+Originally `ws-max-message` was checked per frame, not against the accumulated fragmented
 message. A sequence of individually valid fragments can therefore allocate
 well beyond 64 MiB. `cat-bytes` also copies the entire accumulator for every
 fragment, producing quadratic copy cost. Handshake header accumulation is
