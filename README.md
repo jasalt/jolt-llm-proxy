@@ -12,7 +12,7 @@ history.
 > subscription backend: `/v1/responses` + `/v1/chat/completions` (streaming and
 > non-streaming), WebSocket delta continuation, SSE fallback, token refresh,
 > API-key guard, and the `login`/`logout`/`usage`/`info` CLI — see
-> [`TODO.md`](./TODO.md) Phase 7.
+> [`TODO.md`](./docs/TODO.md) Phase 7.
 
 ## Usage
 
@@ -80,7 +80,7 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
   `get-in`, `assoc` normally — do **not** use `jolt.host/ref-get` there (it
   returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the
   opposite: a `jolt.host/tagged-table`, so read `:write`/`:read`/`:close` with
-  `jolt.host/ref-get`, not `(:write st)`. See [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §1.
+  `jolt.host/ref-get`, not `(:write st)`. See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §1.
 - **`codex.core`** — `start!`/`stop!`, persistent state (token store, session
   pool). `run-server` called with `#'codex.proxy/handler` so live reload via
   `brepl eval -e '(require (quote codex.proxy) :reload)'` picks up redefs
@@ -109,17 +109,17 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
 
 > **Kill nREPL by PID, never `pkill -f 'jolt nrepl-server'`** — that pattern is
 > a substring of the issuing shell command and self-matches, silently killing
-> your shell. See [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §2.
+> your shell. See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §2.
 
 ## Platform notes (read before coding)
 
-- [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) — surprising non-JVM quirks
+- [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) — surprising non-JVM quirks
   (tagged-table access, pkill self-match, nREPL persistence, brepl stdout,
   opaque printing).
-- [`JOLT-ISSUES.md`](./JOLT-ISSUES.md) — upstream gaps/bugs to forward
+- [`JOLT-ISSUES.md`](./docs/JOLT-ISSUES.md) — upstream gaps/bugs to forward
   (JI-1 brepl stdout discard, JI-2 http-client doc gap, JI-3 superseded
   misdiagnosis).
-- [`CLOJURE-CONVERGENCE.md`](./CLOJURE-CONVERGENCE.md) — Clojure-language
+- [`CLOJURE-CONVERGENCE.md`](./docs/CLOJURE-CONVERGENCE.md) — Clojure-language
   divergences confirmed against Babashka (`bb`).
 
 The two most dangerous gotchas: **`jolt.host/tagged-table` does not implement
@@ -128,12 +128,12 @@ use `jolt.host/ref-get` (but never on Ring PMaps, where it is the wrong
 accessor). And the **AOT cache + reader form-swallowing** trap: a top-level
 form missing its closing paren silently absorbs the rest of the file, leaving
 vars *interned but unbound*, while `brepl balance` fails with `Unable to fix`.
-See [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §7–§8.
+See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §7–§8.
 
 ## References
 
 - Original Go implementation: [`../chatgpt-openai-api-adapter/`](../chatgpt-openai-api-adapter/)
   (`proxy.go`, `websocket.go`, `continuation.go`, `translate.go`, `auth.go`).
-- Jolt: https://github.com/jolt-lang/jolt · `llms.txt` at its repo root.
-- ring-chez-adapter: https://github.com/jolt-lang/ring-chez-adapter
-- http-client (TLS/net): https://github.com/jolt-lang/http-client
+- Jolt: <https://github.com/jolt-lang/jolt> · `llms.txt` at its repo root.
+- ring-chez-adapter: <https://github.com/jolt-lang/ring-chez-adapter>
+- http-client (TLS/net): <https://github.com/jolt-lang/http-client>
