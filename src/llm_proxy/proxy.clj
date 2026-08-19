@@ -13,7 +13,8 @@
             [codex.collect :as collect]
             [codex.translate :as tr]
             [llm-proxy.transport.sse :as transport-sse]
-            [llm-proxy.transport.ws :as transport-ws]))
+            [llm-proxy.transport.ws :as transport-ws]
+            [llm-proxy.dashboard :as dashboard]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.
@@ -213,24 +214,35 @@
   "Return the Ring routes for one isolated runtime. Ruuter adds any matched
   path parameters under `:params`; these exact routes currently need none."
   [runtime]
-  [{:path "/health"
-    :method :get
-    :response (fn [_] (health))}
-   {:path "/v1/models"
-    :method :get
-    :response #(require-api-key runtime % models)}
-   {:path "/v1/chat/completions"
-    :method :post
-    :response (fn [req]
-               (require-api-key runtime req
-                                (fn [request] (chat runtime request))))}
-   {:path "/v1/responses"
-    :method :post
-    :response (fn [req]
-               (require-api-key runtime req
-                                (fn [request] (responses runtime request))))}
-   {:path :not-found
-    :response (fn [_] (write-openai-error 404 "not_found" "Not found"))}])
+  (let [routes [{:path "/health"
+                 :method :get
+                 :response (fn [_] (health))}
+                {:path "/v1/models"
+                 :method :get
+                 :response #(require-api-key runtime % models)}
+                {:path "/v1/chat/completions"
+                 :method :post
+                 :response (fn [req]
+                             (require-api-key runtime req
+                                              (fn [request] (chat runtime request))))}
+                {:path "/v1/responses"
+                 :method :post
+                 :response (fn [req]
+                             (require-api-key runtime req
+                                              (fn [request] (responses runtime request))))}]
+        dashboard-routes (when (:dashboard-enabled runtime)
+                           [{:path "/_llm-proxy"
+                             :method :get
+                             :response (fn [req] (dashboard/route runtime req))}
+                            {:path "/_llm-proxy/datastar.js"
+                             :method :get
+                             :response (fn [req] (dashboard/route runtime req))}
+                            {:path "/_llm-proxy/events"
+                             :method :get
+                             :response (fn [req] (dashboard/route runtime req))}])]
+    (conj (into routes dashboard-routes)
+          {:path :not-found
+           :response (fn [_] (write-openai-error 404 "not_found" "Not found"))})))
 
 (defn app [runtime req]
   (ruuter/route (route-table runtime) req))
@@ -238,5 +250,10 @@
 (defn make-handler
   "Build an isolated Ring handler from explicit runtime dependencies."
   [runtime]
-  (let [routes (ruuter/compile-routes (route-table runtime))]
-    (fn [req] (ruuter/route routes req))))
+  (let [runtime (if (:requests runtime)
+                  runtime
+                  (assoc runtime :requests (atom 0)))
+        routes (ruuter/compile-routes (route-table runtime))]
+    (fn [req]
+      (swap! (:requests runtime) inc)
+      (ruuter/route routes req))))

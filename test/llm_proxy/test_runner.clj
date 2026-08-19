@@ -7,7 +7,8 @@
             [llm-proxy.proxy-test]
             [llm-proxy.schema-test]
             [codex.translate-test]
-            [llm-proxy.transport-sse-test]))
+            [llm-proxy.transport-sse-test]
+            [llm-proxy.dashboard-test]))
 
 (defn -main [& _]
   (let [{:keys [fail error]}
@@ -18,6 +19,7 @@
                      'llm-proxy.proxy-test
                      'llm-proxy.schema-test
                      'codex.translate-test
-                     'llm-proxy.transport-sse-test)]
+                     'llm-proxy.transport-sse-test
+                     'llm-proxy.dashboard-test)]
     (when (pos? (+ fail error))
       (throw (ex-info "test suite failed" {:fail fail :error error})))))

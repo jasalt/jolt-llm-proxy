@@ -49,6 +49,10 @@ JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-pro
 # Calva, or Cursive. Defaults to 127.0.0.1:7888; set JOLT_NREPL_PORT to change it.
 jolt -m llm-proxy.core serve --nrepl
 
+# Optional local read-only browser dashboard with live Datastar SSE updates.
+# It is disabled by default and is available at /_llm-proxy/.
+jolt -m llm-proxy.core serve --dashboard
+
 curl -H 'Authorization: Bearer my-key' http://127.0.0.1:8090/v1/models
 curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
      -H 'X-Session-Id: conv-1' \
@@ -60,6 +64,11 @@ jolt -m llm-proxy.core usage   # weekly Codex allowance
 jolt -m llm-proxy.core info     # credentials + JWT claims
 jolt -m llm-proxy.core logout
 ```
+
+The dashboard is loopback-only, read-only, and must not be exposed through a
+reverse proxy without a separately reviewed browser authentication design. It
+vendors Datastar v1.0.2 under `resources/public/js/datastar.js`; normal proxy
+startup does not enable the dashboard.
 
 `JOLT_LLM_PROXY_ADDR` accepts only `127.0.0.1:<port>` or
 `localhost:<port>` because the current Ring adapter is loopback-only. With no

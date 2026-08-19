@@ -1,7 +1,7 @@
 # 260819J — Propose an optional Datastar SSE operator dashboard
 
 - **Date:** 2026-08-19
-- **Status:** Proposed — no implementation yet
+- **Status:** Implemented (initial local-only dashboard)
 
 ## Context
 
@@ -124,22 +124,23 @@ administrative commands with their own authorization review.
 
 ## Adoption gate
 
-The example currently consumes `jolt-lang/datastar` as `{:local/root
-"../../datastar"}` because it has no published Git remote. Therefore this
-proposal does **not** authorize adding an unpinned local-root dependency to the
-proxy.
+The example consumes `jolt-lang/datastar` as a workspace-local dependency and
+therefore does not provide a suitable pinned Jolt runtime dependency for this
+project. The initial implementation resolves that adoption gate by using the
+existing Ring SSE primitives and vendoring the official Datastar v1.0.2 browser
+bundle from jsDelivr's GitHub source:
 
-Before implementation, one of the following must exist:
+```text
+resources/public/js/datastar.js
+SHA-256: 2837d87acf6ee0ba8e4e63765926c25a98d63883b02f88be194a86b81d3fd24a
+```
 
-1. an upstream Git repository with a release/tag and full pinned commit SHA;
-2. a reviewed, project-owned pinned source snapshot with a clear update policy;
-   or
-3. a consciously selected alternative implementation using the existing Ring
-   SSE primitives.
-
-Glimmer, Hiccup, Datastar wrapper behavior, Datastar asset version, SSE
-backpressure/disconnect behavior, and standalone resource embedding must be
-verified on the target Jolt release before adoption.
+The bundle is loaded only by the explicit dashboard route and is embedded in
+standalone builds through `:jolt/build`; no CDN request is made at runtime.
+The wrapper behavior, SSE formatting, disconnect behavior, and resource loading
+are covered by the deterministic tests on the target Jolt release. A future
+adoption of `jolt-lang/datastar` still requires a release/tag and pinned commit
+SHA.
 
 ## Consequences
 
@@ -162,7 +163,7 @@ verified on the target Jolt release before adoption.
 - The current upstream Datastar distribution model blocks a normal pinned
   dependency adoption.
 
-## Acceptance criteria for a future implementation
+## Implementation acceptance criteria
 
 1. Base `serve`, proxy tests, and standalone API builds work without dashboard
    dependencies or resources.

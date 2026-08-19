@@ -28,8 +28,9 @@ jobs:
           jolt --version
       - name: Load production namespaces
         run: >-
-          jolt -e '(doseq [n (quote [llm-proxy.core llm-proxy.id llm-proxy.proxy
-          llm-proxy.schema llm-proxy.transport.sse llm-proxy.transport.ws
+          jolt -e '(doseq [n (quote [llm-proxy.core llm-proxy.dashboard llm-proxy.id
+          llm-proxy.inspect llm-proxy.proxy llm-proxy.schema
+          llm-proxy.transport.sse llm-proxy.transport.ws
           codex.auth codex.cli codex.collect codex.continuation codex.translate
           codex.ws])] (require n))'
       - name: Run unit tests

@@ -40,8 +40,8 @@
   "Initialise the proxy. Production defaults can be replaced at explicit
   dependency seams for deterministic lifecycle tests."
   [& {:keys [port api-key auth-path store run-server stop-server
-             nrepl-port start-nrepl]
-      :or {port 8080 api-key ""
+             nrepl-port start-nrepl dashboard]
+      :or {port 8080 api-key "" dashboard false
            run-server adapter/run-server
            stop-server adapter/stop-server
            start-nrepl start-nrepl!}}]
@@ -57,7 +57,8 @@
     (let [session-id (random-session-id)
           pool (atom {})
           runtime {:store store :pool pool :session-id session-id
-                   :api-key api-key}
+                   :api-key api-key :port port :started-at (System/currentTimeMillis)
+                   :requests (atom 0) :dashboard-enabled dashboard}
           handler (proxy/make-handler runtime)]
       (let [started (atom {})]
         (try
@@ -81,6 +82,8 @@
             (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
             (when nrepl-port
               (println (str "  nREPL: 127.0.0.1:" nrepl-port)))
+            (when dashboard
+              (println "  dashboard: http://127.0.0.1:" port "/_llm-proxy/"))
             running)
           (catch Throwable e
             (when-let [stop-nrepl (:stop-nrepl @started)]
@@ -118,20 +121,25 @@
   [key fallback]
   (or (System/getenv key) fallback))
 
-(defn- nrepl-flag?
-  "True only for the explicit development/debug nREPL serve flag."
+(defn- serve-flags
   [args]
   (cond
-    (empty? args) false
-    (= args ["--nrepl"]) true
-    :else (throw (ex-info "Usage: serve [--nrepl]" {:args args}))))
+    (empty? args) #{}
+    (every? #{"--nrepl" "--dashboard"} args) (set args)
+    :else (throw (ex-info "Usage: serve [--nrepl] [--dashboard]" {:args args}))))
+
+(defn- nrepl-flag? [args]
+  "True only when the explicit development/debug nREPL flag is present."
+  (contains? (serve-flags args) "--nrepl"))
 
 (defn -main [& args]
   (let [command (if (seq args) (first args) "serve")
         command-args (if (seq args) (rest args) [])]
     (case command
       "serve"
-      (let [nrepl? (nrepl-flag? command-args)
+      (let [flags (serve-flags command-args)
+            nrepl? (contains? flags "--nrepl")
+            dashboard? (contains? flags "--dashboard")
             addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
             api-key (env "JOLT_LLM_PROXY_API_KEY" "")
             ;; ring-chez-adapter is loopback-only; reject misleading hosts.
@@ -143,7 +151,8 @@
             nrepl-port (when nrepl?
                          (Integer/parseInt (env "JOLT_NREPL_PORT"
                                                  (str default-nrepl-port))))]
-        (start! :port port :api-key api-key :nrepl-port nrepl-port)
+        (start! :port port :api-key api-key :nrepl-port nrepl-port
+                :dashboard dashboard?)
         ;; Block until interrupted.
         (.addShutdownHook (Runtime/getRuntime)
           (Thread. ^Runnable stop!))
