@@ -191,27 +191,34 @@
   (let [store (:store @system)
         pool (:pool @system)
         header-builder (fn [] (auth/token store))
-        [acq request-body used-delta] (acquire-ws pool full-body session-id header-builder)
-        _ (when used-delta
-            (println "ws-source: using delta continuation for" session-id))
-        frame (assoc request-body :type "response.create")
-        _ (ws/write-text (:conn acq) (json/write-str frame))
-        read (fn [emit]
-               (ws/read-until-terminal
-                (:conn acq)
-                (fn [event]
-                  (emit {:name (:type event) :data (:data event)}))))
-        finalize (fn [meta]
-                   (let [keep (and (:completed meta) (not= (:response-id meta) ""))]
-                     (when keep
-                       (let [items (cont/response-output-to-input-items
-                                    (:items meta) for-chat)]
-                         (ws/set-continuation! (:conn acq)
-                                                {:last-request-body full-body
-                                                 :last-response-id (:response-id meta)
-                                                 :last-response-items items})))
-                     ((:release acq) keep)))]
-    {:read read :finalize finalize}))
+        [acq request-body used-delta] (acquire-ws pool full-body session-id header-builder)]
+    (try
+      (when used-delta
+        (println "ws-source: using delta continuation for" session-id))
+      (let [frame (assoc request-body :type "response.create")]
+        (ws/write-text (:conn acq) (json/write-str frame)))
+      (let [read (fn [emit]
+                   (ws/read-until-terminal
+                    (:conn acq)
+                    (fn [event]
+                      (emit {:name (:type event) :data (:data event)}))))
+            finalize (fn [meta]
+                       (let [keep (and (:completed meta)
+                                       (not= (:response-id meta) ""))]
+                         (when keep
+                           (let [items (cont/response-output-to-input-items
+                                        (:items meta) for-chat)]
+                             (ws/set-continuation!
+                              (:conn acq)
+                              {:last-request-body full-body
+                               :last-response-id (:response-id meta)
+                               :last-response-items items})))
+                         ((:release acq) keep)))]
+        {:read read :finalize finalize})
+      (catch Throwable e
+        ;; Ownership has not transferred to the returned source yet.
+        ((:release acq) false)
+        (throw e)))))
 
 (defn sse-source [request session-id]
   (let [in (upstream-sse request session-id)]

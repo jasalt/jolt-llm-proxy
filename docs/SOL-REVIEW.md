@@ -24,7 +24,7 @@ Progress is updated with each atomic implementation commit.
 | --- | --- | --- | --- |
 | Done | P0 | Save credentials atomically with mode `0600` | Implemented POSIX mode enforcement, temporary-file rename, explicit read/write/delete errors, and credential-field filtering |
 | Done | P0 | Make WebSocket pool acquisition/release atomic | Added serialized pool transitions, identity-checked/idempotent release, and idempotent connection close |
-| Pending | P0 | Guarantee acquired WS connections are released on every failure | A failed first write can leave a pooled session permanently busy |
+| Done | P0 | Guarantee acquired WS connections are released on every failure | `ws-source` now releases with `keep=false` if setup or the initial write fails |
 | Pending | P0 | Report chat stream failures as failures | `stream-chat` can turn an upstream exception into a normal `finish_reason: stop` |
 | Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
 | Pending | P1 | Bound and normalize client session IDs and pool cardinality | Client-controlled IDs create pooled connections, state, and timer futures |
@@ -118,9 +118,13 @@ Required tests should force barriers around the race points and assert:
 
 ### 3. Release a WS acquisition if request setup fails
 
+**Status: implemented.** `ws-source` now retains ownership inside a `try` and
+releases with `keep=false` on setup, JSON encoding, or initial write failure.
+Release is idempotent, so later cleanup cannot double-close the connection.
+
 **Locations:** `src/codex/proxy.clj:178-213`, `src/codex/proxy.clj:223-233`
 
-`ws-source` acquires a connection and then calls `ws/write-text` before it
+The original `ws-source` acquired a connection and then called `ws/write-text` before it
 returns the source/finalizer. If JSON encoding or writing throws,
 `open-event-source` catches the exception and falls back to SSE, but no code
 calls `(:release acq)`. A cached session can remain `:busy true` indefinitely,
