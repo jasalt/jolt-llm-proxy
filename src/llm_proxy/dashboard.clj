@@ -43,7 +43,7 @@
 
 (defn page []
   (str "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jolt LLM Proxy</title>"
-       "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self'; style-src 'unsafe-inline'\">"
+       "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'\">"
        "<style>body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem}"
        ".muted{color:#666}</style>"
        "<script type=\"module\" src=\"/_llm-proxy/datastar.js\"></script></head>"
@@ -58,7 +58,7 @@
 (defn page-response []
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"
-             "Content-Security-Policy" "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'"
+             "Content-Security-Policy" "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'"
              "X-Frame-Options" "DENY"}
    :body (page)})
 

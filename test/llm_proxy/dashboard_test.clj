@@ -21,6 +21,8 @@
         enabled (proxy/make-handler (runtime))]
     (is (= 404 (:status (disabled request))))
     (is (= 200 (:status (enabled request))))
+    (is (.contains (get-in (enabled request) [:headers "Content-Security-Policy"])
+                   "'unsafe-eval'"))
     (is (not (re-find #"secret-token|secret-api-key|raw-session-id"
                       (:body (enabled request)))))))
 

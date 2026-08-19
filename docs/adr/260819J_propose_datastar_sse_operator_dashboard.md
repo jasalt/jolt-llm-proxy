@@ -117,7 +117,10 @@ administrative commands with their own authorization review.
 - Render dynamic values through escaping Hiccup/data APIs, never raw generated
   HTML from upstream/client data. Send appropriate restrictive response headers
   (at minimum content type, frame embedding policy, and a CSP compatible with
-  the vendored module script).
+  the vendored module script). Datastar v1.0.2 compiles its declarative
+  attributes with `Function`, so the local dashboard CSP must include the
+  narrow `script-src 'unsafe-eval'` exception; it does not permit inline
+  scripts or remote script origins.
 - Dashboard opening must not make a failed/unauthenticated Codex backend appear
   healthy: distinguish proxy listener health from backend authentication and
   latest-upstream-result state.
