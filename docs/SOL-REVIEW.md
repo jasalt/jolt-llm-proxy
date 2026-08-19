@@ -27,7 +27,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P0 | Guarantee acquired WS connections are released on every failure | `ws-source` now releases with `keep=false` if setup or the initial write fails |
 | Done | P0 | Report chat stream failures as failures | Failed streams now emit an error, never a successful stop chunk, and finalize with `:completed false` |
 | Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
-| In progress | P1 | Bound and normalize client session IDs and pool cardinality | IDs are now allowlisted and clamped to 64 characters; pool cardinality and timer consolidation remain pending |
+| Done | P1 | Bound and normalize client session IDs and pool cardinality | IDs are allowlisted/clamped and the cache is capped at 128 sessions with idle LRU eviction |
 | Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
 | Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
 | Pending | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
@@ -207,10 +207,12 @@ failing process, not merely missing `PASS` text.
 
 ### 6. Bound client-controlled session state
 
-**Status: partially implemented.** Client-provided IDs are now trimmed,
-restricted to an HTTP-header-safe ASCII allowlist, and clamped to 64 characters
-before becoming pool keys or upstream headers. Invalid values receive a `400`.
-A pool cardinality/continuation-byte cap and consolidated sweeper remain open.
+**Status: implemented.** Client-provided IDs are trimmed, restricted to an
+HTTP-header-safe ASCII allowlist, and clamped to 64 characters before becoming
+pool keys or upstream headers. Invalid values receive a `400`. The connection
+cache is capped at 128 entries; the least-recently-used idle connection is
+closed to make room, and a fully busy cache uses an uncached one-off connection
+rather than growing. Per-session timers remain an optimization opportunity.
 
 **Locations:** `src/codex/proxy.clj:59-73`, `src/codex/ws.clj:313-390`
 

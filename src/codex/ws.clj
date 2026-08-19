@@ -20,6 +20,7 @@
 (def ws-max-message 67108864) ; 64 MiB
 (def ws-session-max-age-ms (* 55 60 1000))
 (def ws-idle-ttl-ms (* 5 60 1000))
+(def ws-max-pooled-sessions 128)
 
 ;; ---------------------------------------------------------------------------
 ;; Handshake key + accept
@@ -337,6 +338,20 @@
                 (when (compare-and-set! released? false true)
                   (close-conn conn)))}))
 
+(defn- make-room!
+  "Evict the oldest idle session when the pool is at capacity. Returns true
+  when a cache slot is available; busy sessions are never interrupted."
+  [pl]
+  (if (< (count @pl) ws-max-pooled-sessions)
+    true
+    (when-let [[session-id session]
+               (first (sort-by (fn [[_ value]] (:last-used value))
+                               (filter (fn [[_ value]] (not (:busy value))) @pl)))]
+      (when-let [f (:idle-future session)] (future-cancel f))
+      (swap! pl dissoc session-id)
+      (close-conn (:conn session))
+      true)))
+
 (defn releaser
   "Return an idempotent release hook for exactly `conn`. Stale hooks never
   mutate a replacement pool entry."
@@ -350,7 +365,8 @@
             (if (and keep owned?)
               (do
                 (swap! pl assoc session-id
-                       (assoc current :busy false :idle-future nil))
+                       (assoc current :busy false :idle-future nil
+                              :last-used (System/currentTimeMillis)))
                 (let [f (future
                           (Thread/sleep ws-idle-ttl-ms)
                           (locking pool-lock
@@ -381,12 +397,16 @@
            (future-cancel f))
          (cond
            (nil? sess)
-           (let [conn (new-conn header-builder session-id)
-                 entry {:conn conn :busy true
-                        :created-at (System/currentTimeMillis) :idle-future nil}]
-             (swap! pl assoc session-id entry)
-             {:conn conn :reused false
-              :release (releaser pl session-id conn)})
+           (if (make-room! pl)
+             (let [now (System/currentTimeMillis)
+                   conn (new-conn header-builder session-id)
+                   entry {:conn conn :busy true :created-at now :last-used now
+                          :idle-future nil}]
+               (swap! pl assoc session-id entry)
+               {:conn conn :reused false
+                :release (releaser pl session-id conn)})
+             ;; Capacity is fully occupied by active requests; do not grow it.
+             (one-off-acquisition header-builder session-id))
 
            (:busy sess)
            (one-off-acquisition header-builder session-id)
@@ -395,16 +415,19 @@
            (do
              (swap! pl dissoc session-id)
              (close-conn (:conn sess))
-             (let [conn (new-conn header-builder session-id)
-                   entry {:conn conn :busy true
-                          :created-at (System/currentTimeMillis) :idle-future nil}]
+             (let [now (System/currentTimeMillis)
+                   conn (new-conn header-builder session-id)
+                   entry {:conn conn :busy true :created-at now :last-used now
+                          :idle-future nil}]
                (swap! pl assoc session-id entry)
                {:conn conn :reused false
                 :release (releaser pl session-id conn)}))
 
            :else
            (do
-             (swap! pl assoc session-id (assoc sess :busy true :idle-future nil))
+             (swap! pl assoc session-id
+                    (assoc sess :busy true :idle-future nil
+                           :last-used (System/currentTimeMillis)))
              {:conn (:conn sess) :reused true
               :release (releaser pl session-id (:conn sess))})))))))
 
