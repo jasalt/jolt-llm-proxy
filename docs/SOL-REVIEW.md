@@ -309,9 +309,11 @@ exact owned resources. Avoid globally shared pools across start/stop cycles.
 ### 9. Split transport, collection, and routing
 
 **Status: in progress.** Outbound HTTP, 401 retry, SSE parsing, and source
-cleanup now live in `codex.transport.sse` with focused parser tests. Runtime
-injection was completed in item 8. WS source lifecycle, collectors, and Ring
-routes still need extraction in similarly bounded commits.
+cleanup now live in `codex.transport.sse` with focused parser tests. Pooled WS
+acquisition, delta continuation, initialization cleanup, event adaptation, and
+finalization now live in `codex.transport.ws`. Runtime injection was completed
+in item 8. Collectors and Ring routes still need extraction in similarly bounded
+commits.
 
 **Location:** `src/codex/proxy.clj`
 

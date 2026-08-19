@@ -8,11 +8,9 @@
             [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
-            [codex.auth :as auth]
-            [codex.ws :as ws]
-            [codex.continuation :as cont]
             [codex.translate :as tr]
             [codex.transport.sse :as transport-sse]
+            [codex.transport.ws :as transport-ws]
             [codex.id :as id]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
@@ -107,51 +105,6 @@
 ;; Transport selection: WebSocket continuation vs SSE fallback
 ;; ---------------------------------------------------------------------------
 
-(defn acquire-ws [pool full-body session-id header-builder]
-  (let [acq (ws/acquire pool session-id header-builder)
-        conn (:conn acq)
-        cont (ws/get-continuation conn)]
-    (if (nil? cont)
-      [acq full-body false]
-      (let [[delta ok?] (cont/build-delta-request full-body cont)]
-        (if ok?
-          [acq delta true]
-          (do (ws/clear-continuation! conn)
-              [acq full-body false]))))))
-
-(defn ws-source [runtime full-body session-id for-chat]
-  (let [store (:store runtime)
-        pool (:pool runtime)
-        header-builder (fn [] (auth/token store))
-        [acq request-body used-delta] (acquire-ws pool full-body session-id header-builder)]
-    (try
-      (when used-delta
-        (println "ws-source: using delta continuation for" session-id))
-      (let [frame (assoc request-body :type "response.create")]
-        (ws/write-text (:conn acq) (json/write-str frame)))
-      (let [read (fn [emit]
-                   (ws/read-until-terminal
-                    (:conn acq)
-                    (fn [event]
-                      (emit {:name (:type event) :data (:data event)}))))
-            finalize (fn [meta]
-                       (let [keep (and (:completed meta)
-                                       (not= (:response-id meta) ""))]
-                         (when keep
-                           (let [items (cont/response-output-to-input-items
-                                        (:items meta) for-chat)]
-                             (ws/set-continuation!
-                              (:conn acq)
-                              {:last-request-body full-body
-                               :last-response-id (:response-id meta)
-                               :last-response-items items})))
-                         ((:release acq) keep)))]
-        {:read read :finalize finalize})
-      (catch Throwable e
-        ;; Ownership has not transferred to the returned source yet.
-        ((:release acq) false)
-        (throw e)))))
-
 (defn sse-source [runtime request session-id]
   (transport-sse/source runtime request session-id))
 
@@ -160,7 +113,7 @@
         default-session (:session-id runtime)]
     (if (and pool (not= session-id "") (not= session-id default-session))
       (try
-        (ws-source runtime request session-id for-chat)
+        (transport-ws/source runtime request session-id for-chat)
         (catch Throwable e
           (println "websocket transport unavailable, falling back to SSE:"
                    (.getMessage ^Throwable e))
