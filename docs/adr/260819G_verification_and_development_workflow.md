@@ -25,6 +25,9 @@ release, loads production namespaces, and runs the deterministic suite. Live
 subscription verification remains separate from the default suite.
 
 Use a persistent Jolt nREPL for development and reload namespaces explicitly.
+For an already-running proxy, `jolt -m llm-proxy.core serve --nrepl` starts the
+same loopback nREPL middleware with the application and binds its stop function
+to `llm-proxy.core/stop!`; `JOLT_NREPL_PORT` overrides its default port 7888.
 After every `.clj` edit, run `brepl balance <file>`. Keep Jolt-specific
 reproductions in the dedicated issues/gotchas/convergence documents rather than
 embedding workarounds silently in architecture prose.

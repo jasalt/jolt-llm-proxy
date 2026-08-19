@@ -45,6 +45,10 @@ jolt -m llm-proxy.core login
 # Serve an OpenAI-compatible API (env: JOLT_LLM_PROXY_ADDR, JOLT_LLM_PROXY_API_KEY):
 JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve
 
+# Development/debug only: start the proxy and a loopback nREPL for CIDER,
+# Calva, or Cursive. Defaults to 127.0.0.1:7888; set JOLT_NREPL_PORT to change it.
+jolt -m llm-proxy.core serve --nrepl
+
 curl -H 'Authorization: Bearer my-key' http://127.0.0.1:8090/v1/models
 curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
      -H 'X-Session-Id: conv-1' \
@@ -140,6 +144,11 @@ brepl -p 7888 '(require (quote llm-proxy.proxy) :reload)'
 # 3. Evaluate a file:
 brepl -f examples/ws_handshake.clj
 ```
+
+For a live proxy process, prefer the explicit `serve --nrepl` flag above: it
+starts an nREPL server with session, interruptible-eval, completion, and lookup
+middleware, then stops it with the proxy. It is loopback-only; do not expose it
+through a reverse proxy or untrusted network.
 
 `examples/ws_handshake.clj` is the proven end-to-end recipe for the outbound wss
 handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns

@@ -25,3 +25,25 @@
                             :run-server (fn [_ _]
                                           (throw (ex-info "bind failed" {}))))))
   (is (nil? @core/system)))
+
+(deftest optional-nrepl-stops-with-the-proxy
+  (let [started (atom [])
+        stopped (atom 0)
+        running (core/start! :port 9999
+                             :nrepl-port 7888
+                             :store authenticated-store
+                             :run-server (fn [handler options]
+                                           {:handler handler :options options})
+                             :stop-server (fn [_] nil)
+                             :start-nrepl (fn [port]
+                                            (swap! started conj port)
+                                            #(swap! stopped inc)))]
+    (is (= [7888] @started))
+    (is (fn? (:stop-nrepl running)))
+    (core/stop!)
+    (is (= 1 @stopped))))
+
+(deftest parses-only-the-explicit-nrepl-flag
+  (is (false? (core/nrepl-flag? [])))
+  (is (true? (core/nrepl-flag? ["--nrepl"])))
+  (is (thrown? Throwable (core/nrepl-flag? ["--unexpected"]))))

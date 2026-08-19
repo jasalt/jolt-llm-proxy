@@ -2,6 +2,10 @@
   "Server startup, runtime state, and CLI entry point."
   (:require [clojure.string :as str]
             [ring-chez.adapter :as adapter]
+            [jolt.nrepl :as nrepl]
+            ;; Kept as a concrete require so Jolt includes the middleware in a
+            ;; standalone build as well as interpreted `serve --nrepl` runs.
+            [nrepl.middleware]
             [codex.auth :as auth]
             [codex.ws :as ws]
             [llm-proxy.proxy :as proxy]
@@ -21,13 +25,26 @@
 ;; Start / stop
 ;; ---------------------------------------------------------------------------
 
+(def default-nrepl-port 7888)
+
+(defn start-nrepl!
+  "Start the optional loopback nREPL server and return its stop function.
+  `nrepl.middleware/default-middleware` adds sessions, interruptible eval,
+  completion, and lookup to Jolt's built-in nREPL handler."
+  ([port]
+   (start-nrepl! port nrepl/start))
+  ([port nrepl-start]
+   (nrepl-start port ['nrepl.middleware/default-middleware])))
+
 (defn start!
   "Initialise the proxy. Production defaults can be replaced at explicit
   dependency seams for deterministic lifecycle tests."
-  [& {:keys [port api-key auth-path store run-server stop-server]
+  [& {:keys [port api-key auth-path store run-server stop-server
+             nrepl-port start-nrepl]
       :or {port 8080 api-key ""
            run-server adapter/run-server
-           stop-server adapter/stop-server}}]
+           stop-server adapter/stop-server
+           start-nrepl start-nrepl!}}]
   (when @system
     (throw (ex-info "system already started" {})))
   ;; 1. Token store
@@ -42,28 +59,39 @@
           runtime {:store store :pool pool :session-id session-id
                    :api-key api-key}
           handler (proxy/make-handler runtime)]
-      (try
-        (let [srv (run-server handler
-                    {:port port
-                     :strategy :threads
-                     :worker-threads 8
-                     :max-request-bytes 1048576
-                     :keep-alive-timeout-ms 30000
-                     :write-timeout-ms 30000})
-              running (assoc runtime :server srv :handler handler
-                             :stop-server stop-server)]
-          (reset! system running)
-          (println (str "Proxy listening on http://127.0.0.1:" port))
-          ;; Correlate sessions via a short hash; never log the raw id.
-          (println (str "  session-id: " (id/short-hash session-id) " (hashed)"))
-          (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
-          running)
-        (catch Throwable e
-          (doseq [[_ sess] @pool]
-            (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
-          (reset! pool {})
-          (reset! system nil)
-          (throw e))))))
+      (let [started (atom {})]
+        (try
+          (let [srv (run-server handler
+                      {:port port
+                       :strategy :threads
+                       :worker-threads 8
+                       :max-request-bytes 1048576
+                       :keep-alive-timeout-ms 30000
+                       :write-timeout-ms 30000})
+                _ (swap! started assoc :server srv)
+                stop-nrepl (when nrepl-port (start-nrepl nrepl-port))
+                _ (swap! started assoc :stop-nrepl stop-nrepl)
+                running (assoc runtime :server srv :handler handler
+                               :stop-server stop-server
+                               :stop-nrepl stop-nrepl)]
+            (reset! system running)
+            (println (str "Proxy listening on http://127.0.0.1:" port))
+            ;; Correlate sessions via a short hash; never log the raw id.
+            (println (str "  session-id: " (id/short-hash session-id) " (hashed)"))
+            (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
+            (when nrepl-port
+              (println (str "  nREPL: 127.0.0.1:" nrepl-port)))
+            running)
+          (catch Throwable e
+            (when-let [stop-nrepl (:stop-nrepl @started)]
+              (try (stop-nrepl) (catch Throwable _ nil)))
+            (when-let [srv (:server @started)]
+              (try (stop-server srv) (catch Throwable _ nil)))
+            (doseq [[_ sess] @pool]
+              (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
+            (reset! pool {})
+            (reset! system nil)
+            (throw e)))))))
 
 (defn stop!
   "Shut down the server, close pooled WS connections, clear system."
@@ -71,6 +99,8 @@
   (when-let [running @system]
     ;; Clear ownership first so repeated stop calls are harmless.
     (reset! system nil)
+    (when-let [stop-nrepl (:stop-nrepl running)]
+      (try (stop-nrepl) (catch Throwable _ nil)))
     (when-let [srv (:server running)]
       (try ((:stop-server running) srv) (catch Throwable _ nil)))
     (let [pool (:pool running)]
@@ -88,19 +118,32 @@
   [key fallback]
   (or (System/getenv key) fallback))
 
+(defn- nrepl-flag?
+  "True only for the explicit development/debug nREPL serve flag."
+  [args]
+  (cond
+    (empty? args) false
+    (= args ["--nrepl"]) true
+    :else (throw (ex-info "Usage: serve [--nrepl]" {:args args}))))
+
 (defn -main [& args]
-  (let [command (if (seq args) (first args) "serve")]
+  (let [command (if (seq args) (first args) "serve")
+        command-args (if (seq args) (rest args) [])]
     (case command
       "serve"
-      (let [addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
+      (let [nrepl? (nrepl-flag? command-args)
+            addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
             api-key (env "JOLT_LLM_PROXY_API_KEY" "")
             ;; ring-chez-adapter is loopback-only; reject misleading hosts.
             [host port-str] (str/split addr #":" 2)
             _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
                 (throw (ex-info "JOLT_LLM_PROXY_ADDR must use 127.0.0.1 or localhost"
                                 {:address addr})))
-            port (if port-str (Integer/parseInt port-str) 8080)]
-        (start! :port port :api-key api-key)
+            port (if port-str (Integer/parseInt port-str) 8080)
+            nrepl-port (when nrepl?
+                         (Integer/parseInt (env "JOLT_NREPL_PORT"
+                                                 (str default-nrepl-port))))]
+        (start! :port port :api-key api-key :nrepl-port nrepl-port)
         ;; Block until interrupted.
         (.addShutdownHook (Runtime/getRuntime)
           (Thread. ^Runnable stop!))
