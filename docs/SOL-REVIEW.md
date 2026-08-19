@@ -31,7 +31,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
 | Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
 | Pending | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
-| Pending | P2 | Correct operational documentation and CLI behavior | Address handling, test claims, and TODO state do not match the source |
+| In progress | P2 | Correct operational documentation and CLI behavior | CLI now rejects unsupported bind hosts and no longer prints the API key; broader documentation reconciliation remains |
 
 ## P0 — security and correctness
 
@@ -364,6 +364,10 @@ and protocol drift.
 
 ### 12. Stop printing secrets and raw identifiers
 
+**Status: partially implemented.** Server startup now prints only whether API
+key authentication is enabled, never the key itself. Session diagnostics and
+the deliberately detailed `info!` output still need a redaction policy.
+
 **Locations:** `src/codex/core.clj:63-66`, `src/codex/proxy.clj:194-231`,
 `src/codex/cli.clj:320-380`
 
@@ -383,9 +387,14 @@ codes.
 
 ### 13. Clarify listen-address behavior and local threat model
 
+**Status: implemented in CLI validation.** Because the pinned adapter is
+loopback-only, `serve` now rejects hosts other than `127.0.0.1` and `localhost`
+instead of silently ignoring them. External exposure still requires a separate
+TLS/authenticating reverse proxy and is not claimed as native support.
+
 **Locations:** `src/codex/core.clj:92-101`, `README.md:18-42`
 
-`CHATGPT_ADAPTER_ADDR` is split into `host` and port, but `host` is unused.
+Previously `CHATGPT_ADAPTER_ADDR` was split into `host` and port, but `host` was unused.
 `ring-chez-adapter` currently binds only `127.0.0.1`, and `start!` always reports
 that address. Thus values such as `0.0.0.0:8080` or `[::1]:8080` are parsed
 incorrectly or misleadingly. The TODO asks to mirror Go's non-loopback safety

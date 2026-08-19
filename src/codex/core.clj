@@ -62,8 +62,7 @@
       (reset! system @proxy/system)
       (println (str "Proxy listening on http://127.0.0.1:" port))
       (println (str "  session-id: " session-id))
-      (when (not= api-key "")
-        (println (str "  api-key:    " api-key)))
+      (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
       @system)))
 
 (defn stop!
@@ -93,9 +92,12 @@
       "serve"
       (let [addr    (env "CHATGPT_ADAPTER_ADDR" "127.0.0.1:8080")
             api-key (env "CHATGPT_ADAPTER_API_KEY" "")
-            ;; Parse host:port
+            ;; ring-chez-adapter is loopback-only; reject misleading hosts.
             [host port-str] (str/split addr #":" 2)
-            port    (if port-str (Integer/parseInt port-str) 8080)]
+            _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
+                (throw (ex-info "CHATGPT_ADAPTER_ADDR must use 127.0.0.1 or localhost"
+                                {:address addr})))
+            port (if port-str (Integer/parseInt port-str) 8080)]
         (start! :port port :api-key api-key)
         ;; Block until interrupted.
         (.addShutdownHook (Runtime/getRuntime)
