@@ -1,141 +1,218 @@
-# JOLT-ISSUES.md
+# Upstream issue review
 
-Reproducible upstream gaps/bugs in the Jolt language, its libraries, or its
-documentation, encountered while porting `chatgpt-openai-api-adapter` to Jolt.
-Per `AGENTS.md` these are intended to be forwarded to maintainers. Clojure
-*language* divergences confirmed against Babashka are filed separately in
-`CLOJURE-CONVERGENCE.md`; surprising non-JVM quirks in `JOLT-GOTCHAS.md`.
+Reproducible upstream gaps encountered while porting
+`chatgpt-openai-api-adapter` to Jolt. This file is a triage queue, not a claim
+that every surprising behavior is a Jolt bug.
 
-Environment: Jolt v0.7.13, brepl 2.7.1, Fedora 44, OpenSSL 3.x
-(`/lib64/libssl.so.3`), glibc.
+Reviewed 2026-08-19 against:
 
----
+- Jolt **v0.7.16** (current release; original observations used v0.7.13)
+- brepl **2.7.1**
+- `jolt-lang/http-client` commit
+  `6faba3570378df91c2c84a588a262b732f4f1858`
+- Fedora 44 x86_64, glibc, OpenSSL 3
 
-## JI-1: `brepl -f <file>` discards buffered `println`/stdout on eval error
+The commands below are independent of this application unless a dependency
+checkout is explicitly required. File issues in the repository named in each
+entry. Clojure semantic divergences belong in `CLOJURE-CONVERGENCE.md`; local
+workflow and platform notes belong in `JOLT-GOTCHAS.md`.
 
-**Tool / version:** `brepl` 2.7.1 (companion to Jolt v0.7.13).
+## Report upstream
 
-**Repro.** File `throwtest.clj`:
+### JI-1: brepl loses successful stdout when the same eval later fails
+
+**Upstream:** <https://github.com/licht1stein/brepl> (not Jolt core)
+
+**Status:** Confirmed with brepl 2.7.1 and a Jolt v0.7.16 nREPL server. No
+matching issue was found in the upstream tracker on 2026-08-19.
+
+This is most clearly a brepl client bug: `--verbose` proves that the server sent
+the output before sending the error, while normal mode does not print it.
+
+Create a file in an otherwise empty directory:
 
 ```clojure
+;; throwtest.clj
 (println "BEFORE-THROW-OUTPUT")
 (throw (ex-info "boom" {:k 1}))
 ```
 
-```
-$ brepl -f throwtest.clj
+Start any nREPL server and pass its port explicitly (Jolt shown here):
+
+```console
+$ jolt nrepl-server 7899
+$ brepl --version
+brepl 2.7.1
+$ brepl -p 7899 -f throwtest.clj
 boom
 Exception: boom
 ```
 
-The `println` line produces **no output**. The exception message is reported,
-but `ex-data` (`{:k 1}`) is not shown, and all stdout emitted before the throw
-is lost.
+`BEFORE-THROW-OUTPUT` is absent. The raw protocol mode shows that nREPL did
+send it:
 
-**Expected.** Buffered stdout emitted before the throw should be flushed, and
-`ex-data` should be shown (as `jolt -e '(load-file "throwtest.clj")'` does — it
-prints `BEFORE-THROW-OUTPUT`, the message `boom`, and `ex-data: {:k 1}`).
-
-**Reference.**
-
-```
-$ jolt -e '(load-file "throwtest.clj")'
-BEFORE-THROW-OUTPUT
-Unhandled exception: boom
-  ex-data: {:k 1}
-  at throwtest.clj:2:1
+```console
+$ brepl -p 7899 --verbose -f throwtest.clj
+{"op" "eval", "code" "(load-file \"throwtest.clj\")", ...}
+{"out" "BEFORE-THROW-OUTPUT\n", ...}
+{"err" "boom\n", ...}
+{"ex" "boom", "status" ["eval-error" "done"], ...}
 ```
 
-**Impact.** Debugging-by-println during REPL-driven dev (`brepl -f`) is
-unreliable: a thrown exception erases all prior `println` evidence, so a
-failure looks like nothing ran. Workaround in `JOLT-GOTCHAS.md` §4 — wrap the
-top-level form in `try`/`catch` returning a data map, or iterate with
-`jolt -e '(load-file …)'` first.
+**Expected:** Normal mode should print every `out` and `err` response received,
+even when the final response has `eval-error`. A useful regression test is to
+feed `process-eval-responses` the three response maps above and assert that the
+CLI writes both `BEFORE-THROW-OUTPUT` and the exception.
 
----
+**Likely location:** brepl 2.7.1 collects `:out` correctly and prints it before
+calling `System/exit` on failure. The observed behavior is consistent with the
+Babashka stdout buffer not being flushed before that exit; explicitly flushing
+stdout before exiting should be investigated.
 
-## JI-2: `jolt-lang/http-client` TLS stream access is undocumented — host tagged-table, not a map
+**Impact:** A failed `brepl -f` makes earlier diagnostic output disappear and
+can falsely suggest that the file never ran.
 
-**Library / version:** `jolt-lang/http-client` SHA
-`6faba3570378df91c2c84a588a262b732f4f1858` (`jolt.http.tls`).
+**Separate concern:** The Jolt nREPL response only carries `"ex" "boom"`; it
+does not expose the exception's `ex-data`. That is not evidence of brepl
+silently dropping `ex-data`, and should not be bundled into the brepl report.
+If richer nREPL errors are desired, first compare Jolt's response with the nREPL
+protocol/middleware contract and file that independently against Jolt/nREPL.
 
-**Repro.** `(jolt.http.tls/tls-connect host port insecure cto rto)` returns a
-host tagged-table (`:jolt/tls-stream`) carrying `:write`, `:read`, `:close`
-closures. The namespace docstring says "A TLS stream is a host tagged-table
-carrying :write / :read / :close closures" but does **not** state that the only
-correct accessor is `jolt.host/ref-get`, nor that keyword-as-function
-(`(:write st)`) returns `nil` because tagged-tables are not `IFn`
-(see `CLOJURE-CONVERGENCE.md` CONV-1).
+### JI-4: `java.util.Base64` shim lacks URL-safe encoder and decoder
+
+**Upstream:** <https://github.com/jolt-lang/jolt>
+
+**Status:** Confirmed on Jolt v0.7.13 and v0.7.16. No matching Jolt issue was
+found on 2026-08-19. This is a small shim-coverage enhancement, not a core
+language defect.
+
+Minimal probe:
+
+```console
+$ jolt -e '(println (System/getProperty "jolt.version")) \
+           (java.util.Base64/getUrlDecoder)'
+v0.7.16
+Unhandled exception: No matching field or method: java.util.Base64/getUrlDecoder
+```
+
+The ordinary decoder exists but does not accept the URL alphabet:
+
+```console
+$ jolt -e '(let [d (java.util.Base64/getDecoder)] \
+             (prn (try (vec (.decode d "_w")) \
+                       (catch Throwable e [(ex-message e)]))))'
+["Base64: illegal character"]
+```
+
+Reference behavior (Babashka/JVM):
+
+```console
+$ bb -e '(let [e (.withoutPadding (java.util.Base64/getUrlEncoder)) \
+                   s (.encodeToString e (byte-array [(byte -1)])) \
+                   d (java.util.Base64/getUrlDecoder)] \
+           (prn [s (vec (.decode d s))]))'
+["_w" [-1]]
+```
+
+**Expected:** Implement at least `Base64/getUrlEncoder` and
+`Base64/getUrlDecoder`, using RFC 4648's `-`/`_` alphabet. JVM parity also
+suggests supporting `.withoutPadding` on the encoder. Tests should cover bytes
+whose output actually differs from standard Base64 (for example `[-1]`), both
+padded and unpadded input, rather than ASCII text such as `hello` whose encoding
+does not distinguish the alphabets.
+
+**Implementation context:** In v0.7.16 the Base64 implementation is in
+`host/chez/java/host-static-classes.ss`; only `getEncoder` and `getDecoder` are
+registered. Jolt's Host Interop page lists `java.util.Base64` but does not state
+this narrower surface.
+
+**Impact:** JWT/JWS and other base64url consumers must translate `-`→`+`,
+`_`→`/`, and restore padding before calling the ordinary decoder. See
+`JOLT-GOTCHAS.md` §6.
+
+## Valid but low-priority documentation contribution
+
+### JI-2: make the raw TLS stream accessor explicit in `http-client`
+
+**Upstream:** <https://github.com/jolt-lang/http-client>
+
+**Verdict:** Valid documentation improvement, but not a runtime bug and not a
+Jolt language-convergence issue.
+
+`jolt.http.tls/tls-connect` returns a Jolt host tagged-table. Such values are
+stateful host wrappers, not persistent Clojure maps, and their fields are read
+with `jolt.host/ref-get`:
 
 ```clojure
-(require '[jolt.http.tls :as tls])
-(def st (tls/tls-connect "chatgpt.com" 443 false 15000 15000))
-(:write st)                 ;; => nil   (JVM muscle memory; silently nil)
-(jolt.host/ref-get st :write) ;; => <closure>
+(require '[jolt.http.tls :as tls]
+         '[jolt.host :as host])
+
+(let [stream (tls/tls-connect "example.com" 443 false 15000 15000)]
+  (try
+    (prn [(host/table? stream)
+          (ifn? stream)
+          (:write stream)
+          (boolean (host/ref-get stream :write))])
+    (finally
+      ((host/ref-get stream :close)))))
+;; => [true false nil true]
 ```
 
-The internal `jolt.http.platform` namespace uses `ref-get` consistently
-(`s-write`, `s-read`, `s-close`), but a downstream consumer building a raw
-WebSocket client on top of `tls-connect` (our use case) gets no hint from the
-docstring and hits "class nil cannot be cast to class clojure.lang.IFn" on the
-first write.
+The network makes that example less suitable for an automated Jolt-core report;
+the underlying behavior can be demonstrated without I/O:
 
-**Expected.** The `jolt.http.tls` docstring should state:
-> The returned stream is a `jolt.host/tagged-table`, not a Clojure map. Read
-> its `:write`/`:read`/`:close` fields with `jolt.host/ref-get`; `(:write st)`
-> returns `nil` because tagged-tables do not implement `IFn`.
-
-**Impact.** Blocks any direct (non-`jolt.http.platform`) use of the TLS stream.
-Workaround in `JOLT-GOTCHAS.md` §1.
-
----
-
-## JI-3 (superseded): `BIO_ctrl` binds to nil on OpenSSL 3 — NOT confirmed
-
-An earlier hypothesis (logged during misdiagnosis) claimed `jolt.http.tls`'s
-`defcfn c-BIO-ctrl "BIO_ctrl"` binds to `nil` on OpenSSL 3 because `BIO_ctrl`
-is a macro. **This turned out to be false on this system:**
-
-```
-$ jolt -e '(require (quote [jolt.http.tls :as tls])) (println (nil? tls/c-BIO-ctrl))'
-false
+```console
+$ jolt -e '(let [t (jolt.host/tagged-table :demo)] \
+             (jolt.host/ref-put! t :a 1) \
+             (prn [(ifn? t) (get t :a) (:a t) \
+                   (jolt.host/ref-get t :a)]))'
+[false nil nil 1]
 ```
 
-`c-BIO-ctrl` binds fine. The real cause of the "nil cannot be cast to IFn"
-crash was CONV-1 / JI-2 (`(:write st)` returning nil on a tagged-table).
-Kept here to prevent re-litigating the same wrong theory. The vendored
-`codex/tls.clj` that "fixed" `bio-pending` was based on this misdiagnosis and
-has been removed; upstream `jolt.http.tls` is used unmodified and a full
-`wss://chatgpt.com/backend-api/codex/responses` WebSocket handshake
-(`101 Switching Protocols` + valid `sec-websocket-accept`) completes with it.
+The current Jolt Host Interop documentation already teaches tagged-table fields
+through `ref-put!`/`ref-get`. The `jolt.http.tls` namespace docstring says that
+the stream is a tagged-table carrying `:write`, `:read`, and `:close`, but does
+not explicitly connect those two facts. A focused http-client doc change would
+help direct users:
 
----
+> The return value is a `jolt.host/tagged-table`, not a persistent map. Obtain
+> the operations with `(jolt.host/ref-get stream :write)` (and `:read` /
+> `:close`); keyword lookup and `get` do not read host fields.
 
-## JI-4: `java.util.Base64` shim missing `getUrlEncoder` / `getUrlDecoder`
+This matters only to consumers deliberately using the low-level TLS namespace;
+normal `jolt.http.platform` users never access these fields directly. Therefore
+it is less important than a failing public API and should be offered as a small
+documentation PR, not reported as a high-severity blocker.
 
-**Component:** Jolt `host/chez/java/` `java.util.Base64` shim (Jolt v0.7.13).
+## Do not report upstream
 
-**Repro.**
+### JI-3: `BIO_ctrl` / OpenSSL 3 hypothesis — disproved
 
-```
-$ jolt -e '(java.util.Base64/getUrlDecoder)'
-No matching field or method: java.util.Base64/getUrlDecoder
-```
+The previous claim that `BIO_ctrl` bound to nil was false. `c-BIO-ctrl` binds on
+the tested OpenSSL 3 system, and the full WebSocket handshake works with the
+upstream TLS implementation. The actual nil was obtained by treating a tagged
+host value as a map (JI-2). Retained here only to prevent reopening the same
+misdiagnosis.
 
-`getEncoder` and `getDecoder` (standard base64) are present and work; only the
-URL-safe variants (`getUrlEncoder`, `getUrlDecoder`) are unimplemented. Per the
-llms.txt note "the `java.*` shims are convincing but shallow", this is an
-expected shim gap, but it is not documented anywhere a downstream user would
-find it, and it breaks any code that copies the common JVM idiom
-`Base64/getUrlDecoder` for JWT work.
+### Local shell/process notes
 
-**Expected.** Either implement `getUrlEncoder`/`getUrlDecoder` in the shim, or
-document the Base64 shim's exact surface (and the base64url→base64std
-workaround) in the Differences-from-Clojure section.
+`pkill -f` self-matching and the need to detach a background nREPL process are
+shell/process-management behavior, not Jolt defects. They remain local notes in
+`JOLT-GOTCHAS.md` §§2–3.
 
-**Impact.** `codex.auth` JWT decoding. Workaround in `JOLT-GOTCHAS.md` §6.
+### Delimiter swallowing
 
-**Confirmed by `bb`?** Not needed — `bb` delegates to the real JVM
-`java.util.Base64/getUrlDecoder`, which works; the divergence is Jolt-only.
-(`bb -e '(println (.decodeToString (java.util.Base64/getUrlDecoder) "aGVsbG8"))')`
-prints `hello` under bb.)
+A misplaced delimiter can make later `def` forms part of an earlier `defn`
+while leaving the whole file syntactically balanced. That is ordinary Lisp
+structure, not a reader bug. `brepl balance` checks delimiter balance; it cannot
+infer the programmer's intended top-level form boundaries. See
+`JOLT-GOTCHAS.md` §8.
+
+### AOT-cache observations
+
+The stale/mixed AOT-cache symptoms in `JOLT-GOTCHAS.md` §7 are operationally
+important but currently lack a minimal sequence that starts from an empty temp
+project/cache and deterministically produces the wrong result on current Jolt.
+Do not file the narrative as an upstream bug. First produce a script that owns
+its temporary `HOME`, edits one namespace, runs a fixed sequence of fresh Jolt
+processes, and asserts stale output; then retest v0.7.16 and main.

@@ -11,9 +11,9 @@ it is tracked in Jolt's `test/conformance/known-divergences.edn`.
 
 ---
 
-## CONV-1: `IFn` not implemented on host tagged-tables — keyword-as-fn / `get` return `nil`
+## CONV-1: host tagged-tables are host wrappers, not Clojure maps
 
-**Form**
+### Form
 
 ```clojure
 (def tt (jolt.host/tagged-table :jolt/x))
@@ -23,62 +23,59 @@ it is tracked in Jolt's `test/conformance/known-divergences.edn`.
 (ifn? tt)
 ```
 
-**Reference (Babashka, on a defrecord / IPersistentMap-like object)**
+### Reference (Babashka, on a defrecord / IPersistentMap-like object)
 
-```
+```console
 bb -e '(defrecord R [a]) (def r (->R 5)) (println (:a r))'
 ;; => 5
 ```
+
 On JVM Clojure a `defrecord` implements `IFn` (`r` is invoked as `(.valAt r :a)`),
 and `clojure.lang.IPersistentMap` likewise, so `(:a m)` returns the value.
 
-**Jolt**
+### Jolt
 
-```
+```console
 jolt -e '(def tt (jolt.host/tagged-table :jolt/x)) (jolt.host/ref-put! tt :a 1)
           (println "ifn?" (ifn? tt) "get" (get tt :a) "kw" (:a tt))'
 ;; => ifn? false get nil kw nil
 ```
 
-**Verdict.** Genuine divergence. Host tagged-tables (`jolt.host/tagged-table`)
-do not implement `IFn`, so `(:a tt)` and `(get tt :a)` silently return `nil`
-instead of the stored value. The only accessor is `jolt.host/ref-get`.
+**Verdict.** Not a Clojure convergence issue. A tagged-table is a Jolt-specific
+mutable host wrapper, not an implementation of `IPersistentMap` or `ILookup`.
+There is no equivalent value to construct in Babashka, and comparing it to a
+`defrecord` changes the tested type and its contracts. `(:a x)` returning nil
+for an object that does not implement keyed lookup is therefore not evidence
+that keyword invocation semantics diverge.
 
-**Tracked in `known-divergences.edn`?** No (not found; `grep keyword|tagged-table|IFn|ref-get`
-returned no matching entry in the registry bundled with Jolt v0.7.13).
+The current Jolt Host Interop documentation explicitly builds tagged-table
+state with `jolt.host/ref-put!` and reads it with `jolt.host/ref-get`. The useful
+remaining action is the low-priority `jolt-lang/http-client` documentation
+clarification in `JOLT-ISSUES.md` JI-2, because that library exposes a raw TLS
+stream using this representation.
 
-**Severity.** High for portability. Any JVM-Clojure code that keyword-calls a
-host object (request maps, response maps, stream handles) reads `nil` silently
-and then fails far from the cause with "class nil cannot be cast to class
-clojure.lang.IFn". The `jolt-lang/http-client` library works around this
-internally (`jolt.http.platform` uses `jolt.host/ref-get` everywhere) but does
-not document the constraint for downstream consumers.
+**Tracked in `known-divergences.edn`?** Appropriately no: this is host API shape,
+not a JVM/Jolt result difference for the same portable Clojure form and value.
 
-**Confirmed by `bb`?** Yes — keyword-as-fn returns the value under `bb`/JVM;
-returns `nil` under Jolt. (The `jolt.host/tagged-table` constructor itself is
-Jolt-specific, so the comparison is on the *language semantics* of calling a
-keyword on an object that stores keyed values, not on the constructor.)
+**Confirmed by `bb`?** No. Babashka has no `jolt.host/tagged-table`; a defrecord
+is not a valid control because it deliberately implements map lookup.
 
 ---
 
-## CONV-2: `(ex-data e)` returns `nil` for host-thrown exceptions
+## CONV-2: `(ex-data e)` concern — not reproduced
 
-**Form**
+The earlier note mixed ordinary host-thrown exceptions (where `ex-data` should
+be nil) with `ex-info`. The direct same-form check succeeds on current Jolt:
 
-```clojure
-(try (/ 1 0) (catch Throwable e (ex-data e)))
+```console
+$ jolt -e '(try (throw (ex-info "boom" {:k 1})) \
+             (catch Throwable e (prn [(ex-message e) (ex-data e)])))'
+["boom" {:k 1}]
 ```
 
-**Reference (Babashka/JVM)** — returns `{}` or the ex-info map for `ex-info`,
-and `nil` for non-ex-info; `ex-message` returns the message string.
+Babashka/JVM returns the same pair. Arithmetic exceptions return nil from
+`ex-data` on both, as expected.
 
-**Jolt** — `(ex-data e)` returns `nil` for arithmetic exceptions (as on JVM),
-but for `jolt.host/tagged-table` exceptions built with `:jolt/ex-info`,
-`(ex-data e)` returns `nil` unless the table is wrapped, while `(ex-message e)`
-returns the `:message` field. (Observed during `diag2.clj` runs.)
-
-**Verdict.** Apparent divergence for host-tagged ex-info objects; needs a
-dedicated `bb` comparison to confirm against `ex-info` semantics before filing
-upstream. Tentative; see `JOLT-ISSUES.md` JI-? if confirmed.
-
-**Confirmed by `bb`?** Not yet — pending a focused `ex-info` comparison.
+**Verdict.** Invalid as currently stated; do not file. A future claim about a
+library-created tagged throwable must include the exact public constructor,
+the expected contract for that distinct host type, and a standalone reproducer.
