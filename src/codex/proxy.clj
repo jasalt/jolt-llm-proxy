@@ -395,24 +395,37 @@
                          (swap! collector #(consume-chat % event emit))))
               nil
               (catch Throwable t t))]
-    (if (and (nil? err) (not (:completed @collector)))
-      (do (sse/send! ch {:event "message"
-                          :data (json/write-str
-                                  {:error {:message "upstream stream closed before response.completed"
-                                           :type "upstream_error" :code "upstream_error"}})})
-          (sse/send! ch {:event "message" :data "[DONE]"}))
+    (cond
+      err
+      (sse/send! ch {:event "message"
+                     :data (json/write-str
+                             {:error {:message "upstream stream failed"
+                                      :type "upstream_error"
+                                      :code "upstream_error"}})})
+
+      (not (:completed @collector))
+      (sse/send! ch {:event "message"
+                     :data (json/write-str
+                             {:error {:message "upstream stream closed before response.completed"
+                                      :type "upstream_error"
+                                      :code "upstream_error"}})})
+
+      :else
       (let [finish (cond (:incomplete @collector) "length"
                          (pos? (count (:calls @collector))) "tool_calls"
                          :else "stop")]
         (sse/send! ch {:event "message"
-                        :data (json/write-str
-                                {:id id :object "chat.completion.chunk"
-                                 :created created :model model
-                                 :choices [{:index 0 :delta {} :finish_reason finish}]
-                                 :usage (openai-usage (:usage @collector))})})
-        (sse/send! ch {:event "message" :data "[DONE]"})))
+                       :data (json/write-str
+                               {:id id :object "chat.completion.chunk"
+                                :created created :model model
+                                :choices [{:index 0 :delta {} :finish_reason finish}]
+                                :usage (openai-usage (:usage @collector))})})))
+    (sse/send! ch {:event "message" :data "[DONE]"})
     (async/close! ch)
-    (chat-response-meta @collector)))
+    (let [meta (chat-response-meta @collector)]
+      (if err
+        (assoc meta :completed false :error err)
+        meta))))
 
 (defn collect-chat [read-fn model]
   (let [collector (atom (new-chat-collector))]
@@ -591,7 +604,7 @@
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
       (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
-      (let [[request model stream] parsed
+      (let [[request _model stream] parsed
             session-id (resolve-session-id req)
             request (apply-prompt-cache-key request session-id)
             src (open-event-source request session-id false)]

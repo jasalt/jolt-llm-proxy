@@ -25,7 +25,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P0 | Save credentials atomically with mode `0600` | Implemented POSIX mode enforcement, temporary-file rename, explicit read/write/delete errors, and credential-field filtering |
 | Done | P0 | Make WebSocket pool acquisition/release atomic | Added serialized pool transitions, identity-checked/idempotent release, and idempotent connection close |
 | Done | P0 | Guarantee acquired WS connections are released on every failure | `ws-source` now releases with `keep=false` if setup or the initial write fails |
-| Pending | P0 | Report chat stream failures as failures | `stream-chat` can turn an upstream exception into a normal `finish_reason: stop` |
+| Done | P0 | Report chat stream failures as failures | Failed streams now emit an error, never a successful stop chunk, and finalize with `:completed false` |
 | Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
 | Pending | P1 | Bound and normalize client session IDs and pool cardinality | Client-controlled IDs create pooled connections, state, and timer futures |
 | Pending | P1 | Harden OAuth callback handling and cleanup | A wrong-state request currently aborts a valid login; HTML errors are unescaped |
@@ -141,9 +141,13 @@ fallback begins.
 
 ### 4. Do not convert a failed chat stream into successful completion
 
+**Status: implemented.** A throwable now emits a generic OpenAI-shaped stream
+error, no successful finish chunk, and metadata with `:completed false`. `[DONE]`
+still closes the SSE protocol cleanly without claiming model success.
+
 **Location:** `src/codex/proxy.clj:375-406`
 
-`stream-chat` captures a throwable in `err`. Its conditional only treats
+The original `stream-chat` captured a throwable in `err`. Its conditional only treated
 `nil err` plus an incomplete collector as an error. When `err` is non-nil, it
 enters the success branch and emits a final chunk whose finish reason is usually
 `"stop"`, followed by `[DONE]`. The caller therefore sees a normal completion
