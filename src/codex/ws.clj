@@ -95,12 +95,54 @@
   (bit-and (aget (buf-take! conn 1) 0) 0xFF))
 
 ;; ---------------------------------------------------------------------------
-;; Dial + handshake
+;; Frame writer (client -> server, masked)
 ;; ---------------------------------------------------------------------------
+
+(defn write-frame
+  "Write one RFC 6455 frame: byte0 = FIN|opcode; byte1 = len (client-masked);
+  4 random mask bytes; then masked payload. Locks the write path so frames
+  from concurrent callers never interleave."
+  [conn opcode payload]
+  (let [st (:stream conn)
+        wfn (:wfn conn)
+        pl (if (string? payload) (.getBytes payload "UTF-8") payload)
+        n (alength pl)
+        mask (byte-array 4)]
+    (.nextBytes (java.security.SecureRandom.) mask)
+    (let [hsize (cond (< n 126) 2 (< n 65536) 4 :else 10)
+          frame (byte-array (+ hsize 4 n))]
+      (aset frame 0 (unchecked-byte (bit-or 0x80 opcode)))
+      (cond
+        (< n 126)
+        (aset frame 1 (unchecked-byte (bit-or 0x80 n)))
+        (< n 65536)
+        (do (aset frame 1 (unchecked-byte (bit-or 0x80 126)))
+            (aset frame 2 (unchecked-byte (bit-shift-right (bit-and n 0xFF00) 8)))
+            (aset frame 3 (unchecked-byte (bit-and n 0xFF))))
+        :else
+        (do (aset frame 1 (unchecked-byte (bit-or 0x80 127)))
+            (doseq [i (range 8)]
+              (aset frame (+ 2 i)
+                    (unchecked-byte (bit-and (bit-shift-right n (* (- 7 i) 8)) 0xFF))))))
+      (System/arraycopy mask 0 frame hsize 4)
+      (dotimes [i n]
+        (aset frame (+ hsize 4 i)
+              (unchecked-byte (bit-xor (bit-and (aget pl i) 0xFF)
+                                       (bit-and (aget mask (mod i 4)) 0xFF)))))
+      (locking (:wlock conn)
+        (wfn st frame)))))
+
+(defn write-text [conn s] (write-frame conn 0x1 s))
+(defn write-close [conn] (write-frame conn 0x8 (byte-array 0)))
 
 (defn close-conn [conn]
   (try (write-close conn) (catch Throwable _ nil))
   (try ((jolt.host/ref-get (:stream conn) :close)) (catch Throwable _ nil)))
+
+
+;; ---------------------------------------------------------------------------
+;; Dial + handshake
+;; ---------------------------------------------------------------------------
 
 (defn- get-header
   "Case-insensitive lookup of an HTTP header value from a raw header block."
@@ -173,47 +215,6 @@
                       {:status status-line :accept accept})))
     conn))
 
-
-;; ---------------------------------------------------------------------------
-;; Frame writer (client -> server, masked)
-;; ---------------------------------------------------------------------------
-
-(defn write-frame
-  "Write one RFC 6455 frame: byte0 = FIN|opcode; byte1 = len (client-masked);
-  4 random mask bytes; then masked payload. Locks the write path so frames
-  from concurrent callers never interleave."
-  [conn opcode payload]
-  (let [st (:stream conn)
-        wfn (:wfn conn)
-        pl (if (string? payload) (.getBytes payload "UTF-8") payload)
-        n (alength pl)
-        mask (byte-array 4)]
-    (.nextBytes (java.security.SecureRandom.) mask)
-    (let [hsize (cond (< n 126) 2 (< n 65536) 4 :else 10)
-          frame (byte-array (+ hsize 4 n))]
-      (aset frame 0 (unchecked-byte (bit-or 0x80 opcode)))
-      (cond
-        (< n 126)
-        (aset frame 1 (unchecked-byte (bit-or 0x80 n)))
-        (< n 65536)
-        (do (aset frame 1 (unchecked-byte (bit-or 0x80 126)))
-            (aset frame 2 (unchecked-byte (bit-shift-right (bit-and n 0xFF00) 8)))
-            (aset frame 3 (unchecked-byte (bit-and n 0xFF))))
-        :else
-        (do (aset frame 1 (unchecked-byte (bit-or 0x80 127)))
-            (doseq [i (range 8)]
-              (aset frame (+ 2 i)
-                    (unchecked-byte (bit-and (bit-shift-right n (* (- 7 i) 8)) 0xFF))))))
-      (System/arraycopy mask 0 frame hsize 4)
-      (dotimes [i n]
-        (aset frame (+ hsize 4 i)
-              (unchecked-byte (bit-xor (bit-and (aget pl i) 0xFF)
-                                       (bit-and (aget mask (mod i 4)) 0xFF)))))
-      (locking (:wlock conn)
-        (wfn st frame)))))
-
-(defn write-text [conn s] (write-frame conn 0x1 s))
-(defn write-close [conn] (write-frame conn 0x8 (byte-array 0)))
 
 ;; ---------------------------------------------------------------------------
 ;; Frame reader + message defragmentation
@@ -319,6 +320,26 @@
   (let [[token account-id] (header-builder)]
     (dial token account-id session-id)))
 
+(defn releaser
+  "Release hook for a pooled session: `keep`=true marks it idle and schedules
+  an idle TTL that closes it if still idle; `keep`=false closes and drops it."
+  [pl session-id conn]
+  (fn [keep]
+    (if (not keep)
+      (do (close-conn conn)
+          (swap! pl (fn [m]
+                      (if (= (:conn (get m session-id)) conn)
+                        (dissoc m session-id) m))))
+      (do (swap! pl assoc-in [session-id :busy] false)
+          (let [f (future
+                    (Thread/sleep ws-idle-ttl-ms)
+                    (when (= (:conn (get @pl session-id)) conn)
+                      (when-not (:busy (get @pl session-id))
+                        (close-conn conn)
+                        (swap! pl dissoc session-id))))]
+            (swap! pl assoc-in [session-id :idle-future] f))))))
+
+
 (defn acquire
   "Acquire a WebSocket session for `session-id`, reusing a cached idle
   connection when available. `header-builder` is `(fn [] [token account-id])`.
@@ -367,25 +388,6 @@
          (do (swap! pl assoc-in [session-id :busy] true)
              {:conn (:conn sess) :reused true
               :release (releaser pl session-id (:conn sess))}))))))
-
-(defn releaser
-  "Release hook for a pooled session: `keep`=true marks it idle and schedules
-  an idle TTL that closes it if still idle; `keep`=false closes and drops it."
-  [pl session-id conn]
-  (fn [keep]
-    (if (not keep)
-      (do (close-conn conn)
-          (swap! pl (fn [m]
-                      (if (= (:conn (get m session-id)) conn)
-                        (dissoc m session-id) m))))
-      (do (swap! pl assoc-in [session-id :busy] false)
-          (let [f (future
-                    (Thread/sleep ws-idle-ttl-ms)
-                    (when (= (:conn (get @pl session-id)) conn)
-                      (when-not (:busy (get @pl session-id))
-                        (close-conn conn)
-                        (swap! pl dissoc session-id))))]
-            (swap! pl assoc-in [session-id :idle-future] f))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Continuation state accessors (per-connection, used by codex.proxy)

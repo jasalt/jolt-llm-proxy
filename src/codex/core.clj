@@ -4,7 +4,8 @@
             [ring-chez.adapter :as adapter]
             [codex.auth :as auth]
             [codex.ws :as ws]
-            [codex.proxy :as proxy]))
+            [codex.proxy :as proxy]
+            [codex.cli :as cli]))
 
 ;; ---------------------------------------------------------------------------
 ;; System atom
@@ -86,7 +87,7 @@
   [key fallback]
   (or (System/getenv key) fallback))
 
-(defn- -main [& args]
+(defn -main [& args]
   (let [command (if (seq args) (first args) "serve")]
     (case command
       "serve"
@@ -102,15 +103,15 @@
         @(promise))
 
       "login"
-      (println "TODO: interactive login — not yet ported. Use `jolt run login`.")
+      (cli/login!)
 
       "logout"
-      (println "TODO: logout — not yet ported.")
+      (cli/logout!)
 
       "usage"
-      (println "TODO: usage — not yet ported.")
+      (cli/usage!)
 
       "info"
-      (println "TODO: info — not yet ported.")
+      (cli/info!)
 
       (println (str "Unknown command: " command "\nUsage: serve | login | logout | usage | info")))))

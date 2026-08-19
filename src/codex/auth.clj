@@ -85,29 +85,40 @@
 ;; Refresh
 ;; ---------------------------------------------------------------------------
 
+(defn exchange-token!
+  "POST an OAuth grant to /oauth/token and build a credential PMap from the
+  response. `params` is a map of form parameters (grant_type, client_id, ...).
+  `old-refresh` is reused when the response omits a refresh token."
+  [params old-refresh]
+  (let [resp (http/post (str auth-base-url "/oauth/token")
+              {:form-params params
+               :throw-exceptions false})]
+    (when-not (= 200 (:status resp))
+      (throw (ex-info "token exchange failed"
+                      {:status (:status resp) :body (:body resp)})))
+    (let [body (json/read-str (:body resp) :key-fn keyword)
+          access (:access_token body)]
+      (when (empty? access)
+        (throw (ex-info "token response is missing access_token" {})))
+      (let [refresh (or (:refresh_token body) old-refresh)
+            expires-in (:expires_in body)
+            expires-at (if (and expires-in (pos? expires-in))
+                         (+ (System/currentTimeMillis) (* (long expires-in) 1000))
+                         (jwt-expiry-ms access))
+            account (account-id-from-jwt access)]
+        {:access_token access
+         :refresh_token refresh
+         :expires_at expires-at
+         :account_id account}))))
+
 (defn refresh-token!
   "Exchange the refresh token for a fresh credential PMap."
   [cred]
-  (let [resp (http/post (str auth-base-url "/oauth/token")
-              {:form-params {"grant_type" "refresh_token"
-                             "client_id" client-id
-                             "refresh_token" (:refresh_token cred)}
-               :throw-exceptions false})]
-    (when-not (= 200 (:status resp))
-      (throw (ex-info "token refresh failed"
-                      {:status (:status resp) :body (:body resp)})))
-    (let [body (json/read-str (:body resp) :key-fn keyword)
-          access (:access_token body)
-          refresh (or (:refresh_token body) (:refresh_token cred))
-          expires-in (:expires_in body)
-          expires-at (if (and expires-in (pos? expires-in))
-                       (+ (System/currentTimeMillis) (* (long expires-in) 1000))
-                       (jwt-expiry-ms access))
-          account (account-id-from-jwt access)]
-      {:access_token access
-       :refresh_token refresh
-       :expires_at expires-at
-       :account_id account})))
+  (exchange-token!
+    {"grant_type" "refresh_token"
+     "client_id" client-id
+     "refresh_token" (:refresh_token cred)}
+    (:refresh_token cred)))
 
 ;; ---------------------------------------------------------------------------
 ;; Stateful token store

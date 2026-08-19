@@ -167,3 +167,85 @@ base64url to standard base64 before decoding:
 Verified against a live OpenAI access token: the decoded payload's
 `:https://api.openai.com/auth` → `:chatgpt_account_id` matches `auth.json`.
 See `JOLT-ISSUES.md` JI-4.
+
+---
+
+## 7. The AOT cache (`~/.jolt/aot-cache`) makes fresh processes diverge from the live nREPL
+
+**Surprise.** `require` goes through `aot-compile-and-cache` (visible in
+stack traces): each compiled namespace is written to `~/.jolt/aot-cache`
+(`.scm`/`.so`/`.deps` artifacts) and **read back by every new `jolt` process**
+(`jolt -e`, `jolt file.clj`, CLI runs). A persistent nREPL session using
+`require ... :reload` sees your edits; a fresh process may load a stale or
+mixed cache state instead. Symptoms seen in this project:
+
+- New defs missing entirely (`No such var: cli/info!`, `Unknown class cli`).
+- Vars present but never bound (`Attempting to call unbound fn: ...`) after a
+  cold compile.
+- `jolt -e '(load-file "src/x.clj")'` succeeding while `jolt -e '(require 'x)'`
+  fails for the same file — different code paths (interpreter vs AOT).
+- A warm cache **masking forward references**: `codex.ws` loaded fine while
+  `close-conn` called `write-close` defined later in the file; the cold compile
+  failed with `Unable to resolve symbol`. The cache served old artifacts that
+  never re-resolved the symbol. (Reordering the defs was the real fix; the
+  error only ever appeared on a cold compile.)
+
+**Workarounds.**
+
+```bash
+# After structural edits, before trusting cold-load behavior:
+rm -rf ~/.jolt/aot-cache
+# Then verify in a fresh process, checking BINDING not just loading:
+jolt -e "(do (require 'codex.cli)
+             (println (bound? (ns-resolve (find-ns 'codex.cli) 'info!))))"
+```
+
+- `:reload` / `:reload-all` in the nREPL refreshes the cache for later
+  processes; a plain `require` in a new process does not recompile.
+- Order top-level defs callee-before-caller on a cold compile, or use
+  `(declare later-fn)` — verified working in Jolt.
+- **Do not trust "the namespace loaded" as success.** `require` returning
+  without error only means the reader+compiler ran; it says nothing about
+  which defs actually got bound (see §8).
+
+---
+
+## 8. A missing paren silently swallows the rest of the file — vars become "unbound", not "missing"
+
+**Surprise.** If a top-level form is missing its final closing delimiter, the
+reader does not fail — it keeps reading, and **every following top-level form
+becomes part of the broken form's body**. If that form is a `defn`, the
+swallowed `(def ...)`/`(defn ...)` forms are compiled as *body statements*:
+their vars get interned at compile time but stay **unbound** until the outer
+function is actually called. This bit `codex.cli` for a full session:
+
+- `(cli/info!)` → `Attempting to call unbound fn: #'codex.cli/info!` cold,
+  but worked in processes where `usage!` had been called first.
+- `(cli/usage!)` **returned `#'codex.cli/info!`** — the last swallowed form
+  was `(defn info! ...)`, and `defn` evaluates to the var.
+- `ns-publics` listed all 21 vars (interned), hiding that the last six were
+  unbound. `brepl balance` reported `Unable to fix` — the real warning sign.
+
+**Detection.** Whole-file paren depth is useless here (our file netted to 0
+because a stray `)` sat at EOF). Check **per-form** balance:
+
+```python
+# every top-level form must return to depth 0 before the next starts
+```
+
+and probe binding, not existence:
+
+```clojure
+(doseq [[s v] (ns-publics (find-ns 'codex.cli))]
+  (when-not (bound? v) (println "UNBOUND:" s)))
+```
+
+**Rules adopted.**
+
+- `brepl balance` failing with `Unable to fix` = stop and hand-inspect; it
+  means delimiters are irreconcilable, usually a misplaced close, not just a
+  missing one at EOF.
+- Never "fix" a paren imbalance by appending `)` at EOF — it balances the
+  count while corrupting the structure (that is exactly what created this bug).
+- A function returning a `#'var` (or any value it has no business returning)
+  is the signature of swallowed defs in its body.
