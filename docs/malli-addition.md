@@ -1,158 +1,118 @@
-## Verdict
+# Malli addition review and implementation status
 
-**Yes — Malli can apply usefully to `codex.translate` validation on Jolt, but it should complement rather than replace the existing translation/normalization code.**
+**Status: implemented for structural request validation (2026-08-19).**
 
-The Jolt example demonstrates that Malli runs on Jolt with a small compatibility shim, and I verified a representative string-keyed request schema locally against **Jolt v0.7.13**.
+Malli is now used as a small, isolated validation boundary in
+`codex.schema`. It validates parsed, **string-keyed** client JSON before any
+client-controlled key is converted to a keyword. `codex.translate` retains
+translation, normalization, continuation compatibility, and all other policy
+logic.
 
-### What I verified
+## Completed recommendation checklist
 
-Using the example’s pinned Malli revision and `borkdude.dynaload` shim:
+| Recommendation | Status | Implementation |
+| --- | --- | --- |
+| Pin Malli | **Done** | `deps.edn` pins `metosin/malli` at `a74e3b45efa30b3bcdb2e997f337c71614eba3c5`. Malli's resolved Maven dependencies include `borkdude/dynaload`, so no local shim is needed in this project. |
+| Keep schemas in a dedicated namespace | **Done** | `src/codex/schema.clj` owns reusable schemas and no proxy/transport namespace requires Malli directly. |
+| Validate string-keyed input before keyword conversion | **Done** | `chat-to-responses` and `prepare-responses` parse through `json/read-str` without a key function, then call `schema/validate-chat!` / `schema/validate-responses!`. |
+| Use open maps for compatibility | **Done** | Both endpoint schemas are open. Chat translation still drops unknown fields explicitly; Responses keeps unknown top-level fields as string keys for upstream pass-through. |
+| Replace mechanical shape checks only | **Done** | Malli owns model/messages/input/tool/content/option shapes and collection bounds. Translation and security policies remain handwritten. |
+| Preserve stable non-sensitive client errors | **Done** | `schema/validate!` puts `m/explain` under `:malli/explain` in local `ex-data`, but throws endpoint-stable messages. The proxy exposes only `ex-message` in its OpenAI-shaped HTTP 400. |
+| Test project schemas and useful Malli forms | **Done** | `test/codex/schema_test.clj`, registered in the deterministic test runner, covers project schemas, explanations, open/closed maps, tuples, enums, regexes, map-of, and discriminated multi schemas. |
 
-- `m/validate` works for a string-keyed Chat request map.
-- bounded vectors (`{:min 1 :max 1000}`) work.
-- predicates such as `boolean?` and `number?` work.
-- `m/explain` returns structured error paths.
-- Malli maps are **open by default**, which is important:
-  - unknown `/v1/responses` top-level keys validate and can remain string-keyed for upstream pass-through;
-  - `{:closed true}` rejects unknown keys, if that policy is ever desired.
+The suite currently passes with **28 tests / 96 assertions**:
 
-Example result from the local probe:
-
-```clojure
-(m/validate ChatRequest valid) ;=> true
-(m/validate ChatRequest bad)   ;=> false
-(m/explain ChatRequest bad)
-;; => ... {:path ["stream"], :in ["stream"], :value "yes"} ...
+```console
+jolt -M:test -m codex.test-runner
 ```
 
-## Integration requirements
+## Schema boundary
 
-The upstream Jolt example uses:
+`codex.schema` currently validates the structural subset the proxy consumes:
 
-```clojure
-{:paths ["src" "shims"]
- :deps {metosin/malli
-        {:git/url "https://github.com/metosin/malli"
-         :git/sha "a74e3b45efa30b3bcdb2e997f337c71614eba3c5"}}}
-```
+- non-empty string `model`;
+- one to 1,000 Chat messages, each an object with string `role` and optional
+  string/vector-of-object `content`;
+- one to 1,000 Responses input objects (or a string input);
+- optional boolean `stream` and `parallel_tool_calls`;
+- optional numeric `temperature`;
+- optional string-or-object `tool_choice`;
+- `tools`/legacy `functions` as at most 128 objects;
+- supplied `tool.function` and assistant `tool_calls[*].function` wrappers as
+  objects;
+- optional string `tool_call_id`.
 
-and a required shim at `shims/borkdude/dynaload.clj`:
+Schemas intentionally use **string JSON keys**. This maintains the protection
+against unbounded interning of arbitrary top-level client keys. The only
+recursive keyword conversion remains the bounded Responses `input` conversion,
+which is necessary for keyword-keyed continuation prefix matching.
 
-```clojure
-(ns borkdude.dynaload)
+## Deliberately left outside Malli
 
-(defn dynaload [_sym & [opts]]
-  (delay (:default opts)))
-```
+These items are still owned by `codex.translate` or endpoint handling and are
+not omissions:
 
-That is necessary because Malli’s load path references optional JVM-oriented dependencies. The Jolt example explicitly warns that Malli is heavily JVM-coupled internally, despite its supported validation surface working.
+| Concern | Reason it remains handwritten |
+| --- | --- |
+| Parsing bytes and malformed JSON | Transport/body concern preceding schema validation. |
+| `n` must be `1` | Adapter support policy rather than input shape. |
+| 32-level nested-input cap | Applied during the only recursive keyword conversion; it limits the conversion work itself. |
+| Chat-to-Responses message/tool/format transformation | Produces a different API representation, defaults fields, and drops unsupported fields. |
+| `:stream true`, `:store false`, default instructions, max-token removal, service-tier remapping | Intentional proxy behavior, not client validity. |
+| Responses recognized-key allowlist and unknown-key pass-through | Security/compatibility transformation policy. |
+| Exact per-field OpenAI semantic rules | The adapter supports a constrained API subset; adding every upstream contract field is separate product work. |
+| Humanized Malli errors in HTTP responses | `m/explain` is retained locally, but external error wording remains stable and avoids exposing schema internals. |
 
-## Good fit for this project
+## Jolt capability investigation
 
-Malli would reduce repetitive shape checks in `src/codex/translate.clj`, particularly:
+The following operations were exercised in this repository with Jolt **v0.7.13**
+and Malli commit `a74e3b45efa30b3bcdb2e997f337c71614eba3c5`:
 
-| Current rule | Malli fit |
-|---|---|
-| JSON top-level object | Strong |
-| required non-empty `model` string | Strong |
-| `messages` / `input` vector bounds | Strong |
-| vector entries must be maps | Strong |
-| optional boolean `stream` | Strong |
-| optional numeric `temperature` | Strong |
-| tools/functions are vectors of maps, max 128 | Strong |
-| `tool_choice` string-or-map | Strong |
-| content is string or vector of maps | Strong |
-| nested tool-call `function` object | Strong |
-| detailed client-facing invalid-field diagnostics | Strong via `m/explain` |
+| Malli facility | Result | Relevance |
+| --- | --- | --- |
+| `m/validate`, `m/explain` | Works | Used by `codex.schema`. Explain results include useful `:in` paths. |
+| Open and `{:closed true}` `:map` schemas | Works | Open maps implement Responses compatibility; closed maps are available for future internal payloads. |
+| `:vector` bounds, `:tuple`, `:enum`, `:re`, `:map-of` | Works | Suitable for additional declarative request constraints. |
+| `:multi` with a function dispatch over string-keyed maps | Works | Suitable if content-part variants later need strict discrimination. |
+| `malli.error/humanize` | Works | Available for local/operator diagnostics; intentionally not emitted to clients. |
+| `malli.transform/string-transformer` and `m/decode` | Works | Available but not used: coercion would weaken the proxy's strict wire validation. |
+| `malli.json-schema/transform`, `malli.swagger/transform` | Works | Available for future generated documentation, not used at runtime. |
+| `malli.generator/generate` | Works | Available for future property/generative tests, not introduced into the deterministic suite. |
 
-A schema would need **string keys**, matching the deliberate no-keyword-interning parsing policy:
+### Important usage notes
 
-```clojure
-(ns codex.schema
-  (:require [malli.core :as m]))
+- The tested Malli revision accepts `:string` and `:int` keyword schemas, but
+  the attempted `:number` keyword schema was invalid. Use the portable
+  predicate `number?` for JSON numeric fields and `boolean?` for booleans, as
+  `codex.schema` does. This is Malli schema vocabulary behavior, not a Jolt
+  divergence.
+- `:multi` dispatch is a value/function (for string-keyed JSON, e.g.
+  `(fn [value] (get value "type"))`), not a literal string key.
+- Malli `.cljc` sources select their `:clj` branches on Jolt. Its internals use
+  JVM-shaped compatibility layers, but all facilities listed above loaded and
+  executed in the project test environment. The pinned Malli dependency resolves
+  its real `borkdude/dynaload` transitive dependency on this Jolt installation;
+  unlike the standalone Jolt example, this project needs no copied shim.
 
-(defn non-empty-string? [x]
-  (and (string? x) (not= x "")))
+## Upstream gap / feature-request assessment
 
-(def chat-request
-  [:map
-   ["model" [:and :string [:fn non-empty-string?]]]
-   ["messages"
-    [:vector {:min 1 :max 1000}
-     [:map
-      ["role" :string]
-      ["content" {:optional true}
-       [:or :string [:vector :map]]]
-      ["tool_calls" {:optional true}
-       [:vector
-        [:map ["function" :map]]]]]]]
-   ["stream" {:optional true} boolean?]
-   ["temperature" {:optional true} number?]
-   ["tools" {:optional true}
-    [:vector {:max 128} :map]]])
-```
+**No reproducible missing Malli operation, packaging issue, or Jolt
+language-convergence defect was found in the validation surface exercised
+above.** Consequently, no Malli entry has been added to `JOLT-ISSUES.md`.
+Filing one would overstate the evidence.
 
-One Jolt-specific detail from the probe: use predicates such as `boolean?` and `number?` for these values. The attempted keyword schema `:number` was invalid with the pinned Malli revision. The example confirms primitives such as `:string` and `:int`; predicates are the more portable choice for broader numeric/boolean cases.
+The official `malli-app` example includes a small local `borkdude.dynaload`
+shim, but dependency resolution for this project brings in Malli's real
+transitive `borkdude/dynaload 0.3.5` artifact. A fresh minimal project with the
+same pinned Git dependency also loaded `malli.core` and `malli.generator`
+without that shim. The example's shim may be useful for a narrower/manual
+classpath setup, but it is not a demonstrated requirement or upstream gap for
+normal `deps.edn` resolution.
 
-## What should remain handwritten
+## Decision
 
-Malli should **not** replace `translate.clj` wholesale. The following are transformation or policy logic, not merely validation:
-
-- parsing request JSON with string keys;
-- explicit recognized-key extraction for Chat requests;
-- preserving unknown `/v1/responses` keys as string keys;
-- keywordizing the recognized `/v1/responses` allowlist;
-- bounded recursive keywordization of `:input` for continuation compatibility;
-- the 32-level custom nesting cap;
-- translating Chat messages/tools/response formats to Responses API shape;
-- defaulting `:instructions`, forcing `:stream true` and `:store false`;
-- `max_output_tokens` / `max_tokens` removal;
-- `service_tier "fast"` → `"priority"`;
-- semantic rule `n` must equal 1;
-- error-message compatibility and HTTP-400 mapping.
-
-In particular, the current string-key policy is security-sensitive. A schema must validate string-keyed input **before** any keyword conversion; it should never encourage using `json/read-str` with `:key-fn keyword`.
-
-## Recommended adoption shape
-
-I recommend a small, isolated `codex.schema` namespace and a phased use:
-
-1. Add pinned Malli dependency plus the exact shim from the Jolt example.
-2. Define **open** string-keyed schemas:
-   - `chat-request-schema`
-   - `responses-request-schema`
-   - reusable `content`, `tool`, and `input-item` schemas.
-3. Keep current parsing and normalization in `codex.translate`.
-4. Replace only mechanical `check` blocks with:
-   ```clojure
-   (when-not (m/validate chat-request-schema request)
-     (throw (ex-info "invalid chat request"
-                     {:malli/explain (m/explain chat-request-schema request)})))
-   ```
-5. Convert Malli explanations into the project’s stable, non-sensitive client error form rather than exposing raw schema internals.
-6. Retain focused tests for:
-   - unknown Responses-field pass-through;
-   - continuation prefix matching;
-   - max tool/message/input limits;
-   - malformed nested function calls and content parts;
-   - nesting depth.
-
-## Trade-offs
-
-**Benefits**
-- More declarative request contracts.
-- Less bespoke shape-validation code.
-- Better structured diagnostics through `m/explain`.
-- Easier expansion as OpenAI request support grows.
-
-**Costs / risks**
-- Adds a fairly large, JVM-oriented dependency to a deliberately small Jolt service.
-- Requires a local compatibility shim.
-- Jolt support is demonstrated by the example, but it is newer/less battle-tested than JVM Clojure usage.
-- Does not eliminate the custom security/translation logic that makes this adapter correct.
-
-## Recommendation
-
-Adopt Malli **only for declarative structural validation**, behind a small `codex.schema` boundary, while retaining `codex.translate` as the owner of parsing, security-sensitive key handling, normalization, and request translation.
-
-That would be a net improvement if the project expects the supported request surface to grow. If the current narrow API surface is intentionally stable, the existing explicit validators are already sound and avoid adding a nontrivial dependency.
+Keep Malli limited to `codex.schema` structural validation. This removes
+repetitive shape checks while preserving the existing security-sensitive
+string-key parsing and translation semantics. Reassess schema expansion only
+when the supported OpenAI request subset grows or generated API documentation
+becomes a concrete need.

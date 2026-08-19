@@ -11,11 +11,9 @@
   original string keys (deliberate compatibility policy); input items are
   keywordized recursively (bounded by item count, body size, and a nesting
   cap) so `codex.continuation` keeps matching prefixes."
-  (:require [clojure.data.json :as json]))
+  (:require [clojure.data.json :as json]
+            [codex.schema :as schema]))
 
-(def max-messages 1000)
-(def max-tools 128)
-(def max-input-items 1000)
 (def max-nesting-depth 32)
 
 ;; ---------------------------------------------------------------------------
@@ -40,71 +38,12 @@
     (check (map? parsed) message)
     parsed))
 
-(defn- require-string-field
-  "Return a non-empty string field or throw."
-  [m k message]
-  (let [v (get m k)]
-    (check (and (string? v) (not= v "")) message)
-    v))
-
-(defn- valid-boolean? [v]
-  (or (nil? v) (true? v) (false? v)))
-
-(defn- valid-content?
-  "Content is a string or a vector of content-part objects."
-  [v]
-  (or (nil? v)
-      (string? v)
-      (and (vector? v) (every? map? v))))
-
-(defn- valid-tools?
-  "Tools is a bounded vector of objects."
-  [v]
-  (and (vector? v)
-       (<= (count v) max-tools)
-       (every? map? v)))
-
-(defn- validate-chat-shape
-  "Validate the /v1/chat/completions fields the translation consumes."
+(defn- validate-chat-semantics
+  "Validate translation policy not expressible as a structural schema."
   [chat]
-  (check (valid-boolean? (get chat "stream")) "stream must be a boolean")
-  (let [tools (get chat "tools")]
-    (when (some? tools) (check (valid-tools? tools) "tools must be an array of objects")))
-  (let [functions (get chat "functions")]
-    (when (some? functions)
-      (check (valid-tools? functions) "functions must be an array of objects")))
-  (let [tool-choice (get chat "tool_choice")]
-    (when (some? tool-choice)
-      (check (or (string? tool-choice) (map? tool-choice))
-             "tool_choice must be a string or object")))
-  (let [temperature (get chat "temperature")]
-    (when (some? temperature)
-      (check (number? temperature) "temperature must be a number")))
-  (let [parallel (get chat "parallel_tool_calls")]
-    (when (some? parallel)
-      (check (valid-boolean? parallel) "parallel_tool_calls must be a boolean")))
   (let [n (get chat "n")]
     (when (and (number? n) (not= n 1))
       (throw (ex-info "only n=1 is supported" {})))))
-
-(defn- validate-message
-  "Validate one chat message map (string keys)."
-  [value]
-  (check (map? value) "each message must be an object")
-  (let [role (get value "role")]
-    (check (string? role) "message role must be a string")
-    (check (valid-content? (get value "content"))
-           "message content must be a string or array of objects")
-    (let [calls (get value "tool_calls")]
-      (when (some? calls)
-        (check (and (vector? calls) (every? map? calls))
-               "tool_calls must be an array of objects")
-        (doseq [call calls]
-          (check (map? (get call "function"))
-                 "each tool_call must have a function object"))))
-    (let [call-id (get value "tool_call_id")]
-      (when (some? call-id)
-        (check (string? call-id) "tool_call_id must be a string")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Content extraction / construction (string-keyed input)
@@ -194,15 +133,11 @@
   Throws on invalid input. Unknown top-level fields are dropped: the upstream
   request is built only from recognized fields."
   [raw]
-  (let [chat (parse-object raw "request body must be a JSON object")
-        model (require-string-field chat "model" "model must be a non-empty string")
+  (let [chat (-> (parse-object raw "request body must be a JSON object")
+                 (schema/validate-chat!))
+        model (get chat "model")
         messages (get chat "messages")]
-    (check (and (vector? messages) (not (empty? messages)))
-           "messages must be a non-empty array")
-    (check (<= (count messages) max-messages)
-           "too many messages" {:limit max-messages})
-    (validate-chat-shape chat)
-    (doseq [value messages] (validate-message value))
+    (validate-chat-semantics chat)
     (let [stream (get chat "stream")
           instructions (atom "")
           input (atom [])]
@@ -330,20 +265,10 @@
   unchanged (R6). Unknown top-level keys pass through upstream with their
   original string keys."
   [raw]
-  (let [request (parse-object raw "request body must be a JSON object")
-        model (require-string-field request "model"
-                                    "model must be a non-empty string")
+  (let [request (-> (parse-object raw "request body must be a JSON object")
+                    (schema/validate-responses!))
+        model (get request "model")
         input (get request "input")]
-    (check (contains? request "input") "input is required")
-    (check (or (string? input) (vector? input)) "input must be a string or array")
-    (when (vector? input)
-      (check (<= (count input) max-input-items)
-             "too many input items" {:limit max-input-items})
-      (check (every? map? input) "each input item must be an object"))
-    (check (valid-boolean? (get request "stream")) "stream must be a boolean")
-    (let [tools (get request "tools")]
-      (when (some? tools)
-        (check (valid-tools? tools) "tools must be an array of objects")))
     (let [request (keywordize-known-keys request)
           request (if (vector? input)
                     (assoc request :input (keywordize-nested input))

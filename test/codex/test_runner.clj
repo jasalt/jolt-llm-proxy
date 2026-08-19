@@ -5,6 +5,7 @@
             [codex.core-test]
             [codex.continuation-test]
             [codex.proxy-test]
+            [codex.schema-test]
             [codex.translate-test]
             [codex.transport-sse-test]))
 
@@ -15,6 +16,7 @@
                      'codex.core-test
                      'codex.continuation-test
                      'codex.proxy-test
+                     'codex.schema-test
                      'codex.translate-test
                      'codex.transport-sse-test)]
     (when (pos? (+ fail error))
