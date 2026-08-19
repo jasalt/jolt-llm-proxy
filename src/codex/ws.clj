@@ -98,6 +98,10 @@
 ;; Dial + handshake
 ;; ---------------------------------------------------------------------------
 
+(defn close-conn [conn]
+  (try (write-close conn) (catch Throwable _ nil))
+  (try ((jolt.host/ref-get (:stream conn) :close)) (catch Throwable _ nil)))
+
 (defn- get-header
   "Case-insensitive lookup of an HTTP header value from a raw header block."
   [header-str name]
@@ -169,9 +173,6 @@
                       {:status status-line :accept accept})))
     conn))
 
-(defn close-conn [conn]
-  (try (write-close conn) (catch Throwable _ nil))
-  (try ((jolt.host/ref-get (:stream conn) :close)) (catch Throwable _ nil)))
 
 ;; ---------------------------------------------------------------------------
 ;; Frame writer (client -> server, masked)
@@ -385,3 +386,11 @@
                         (close-conn conn)
                         (swap! pl dissoc session-id))))]
             (swap! pl assoc-in [session-id :idle-future] f))))))
+
+;; ---------------------------------------------------------------------------
+;; Continuation state accessors (per-connection, used by codex.proxy)
+;; ---------------------------------------------------------------------------
+
+(defn get-continuation [conn] @(:continuation conn))
+(defn set-continuation! [conn c] (reset! (:continuation conn) c))
+(defn clear-continuation! [conn] (reset! (:continuation conn) nil))
