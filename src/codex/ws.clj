@@ -4,7 +4,11 @@
 
   The outbound TLS stream is a `jolt.host/tagged-table` (NOT a Clojure map):
   read its `:write`/`:read`/`:close` closures with `jolt.host/ref-get`. Client
-  frames MUST be masked."
+  frames MUST be masked.
+
+  The frame encoding, buffering, fragmentation, and control-frame handling are
+  generic WebSocket machinery retained here for now; the endpoint handshake,
+  event protocol, and continuation-aware pool are Codex-specific."
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
             [jolt.http.tls :as tls]

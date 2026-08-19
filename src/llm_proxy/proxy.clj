@@ -9,6 +9,7 @@
             [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
+            [ruuter.core :as ruuter]
             [codex.collect :as collect]
             [codex.translate :as tr]
             [llm-proxy.transport.sse :as transport-sse]
@@ -205,23 +206,37 @@
              :body (json/write-str response)}))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Top-level handler (var, so redefs are live via run-server #'handler)
+;; Top-level handler and routes
 ;; ---------------------------------------------------------------------------
 
+(defn route-table
+  "Return the Ring routes for one isolated runtime. Ruuter adds any matched
+  path parameters under `:params`; these exact routes currently need none."
+  [runtime]
+  [{:path "/health"
+    :method :get
+    :response (fn [_] (health))}
+   {:path "/v1/models"
+    :method :get
+    :response #(require-api-key runtime % models)}
+   {:path "/v1/chat/completions"
+    :method :post
+    :response (fn [req]
+               (require-api-key runtime req
+                                (fn [request] (chat runtime request))))}
+   {:path "/v1/responses"
+    :method :post
+    :response (fn [req]
+               (require-api-key runtime req
+                                (fn [request] (responses runtime request))))}
+   {:path :not-found
+    :response (fn [_] (write-openai-error 404 "not_found" "Not found"))}])
+
 (defn app [runtime req]
-  (let [method (:request-method req)
-        uri (:uri req)]
-    (cond
-      (and (= method :get) (= uri "/health")) (health)
-      (and (= method :get) (= uri "/v1/models"))
-      (require-api-key runtime req models)
-      (and (= method :post) (= uri "/v1/chat/completions"))
-      (require-api-key runtime req #(chat runtime %))
-      (and (= method :post) (= uri "/v1/responses"))
-      (require-api-key runtime req #(responses runtime %))
-      :else (write-openai-error 404 "not_found" "Not found"))))
+  (ruuter/route (route-table runtime) req))
 
 (defn make-handler
   "Build an isolated Ring handler from explicit runtime dependencies."
   [runtime]
-  (fn [req] (app runtime req)))
+  (let [routes (ruuter/compile-routes (route-table runtime))]
+    (fn [req] (ruuter/route routes req))))

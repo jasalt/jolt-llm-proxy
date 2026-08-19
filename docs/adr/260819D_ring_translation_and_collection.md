@@ -32,10 +32,13 @@ Responsibilities are:
   for streaming and nonstreaming clients;
 - `llm-proxy.transport.*`: produce events and own transport cleanup.
 
-Retain the simple `cond` router while the API has four exact routes. Do not add
-Reitit solely to replace these comparisons. Retain maps and functions as the
-internal event-source interface rather than introducing a protocol with no
-multiple implementation requirement beyond the two transport maps.
+Use `askonomm/ruuter` for the Ring route table. Routes remain plain data and
+Ruuter's best-match semantics leave room for future path parameters without
+reintroducing routing conditionals into `llm-proxy.proxy`. Keep API-key
+protection in the route response functions so routing and authorization remain
+separate concerns. Retain maps and functions as the internal event-source
+interface rather than introducing a protocol with no multiple implementation
+requirement beyond the two transport maps.
 
 ## Consequences
 
@@ -43,9 +46,10 @@ multiple implementation requirement beyond the two transport maps.
 - SSE and WS transports feed identical event maps to endpoint logic.
 - Unknown Chat fields can be deliberately dropped while Responses compatibility
   policy remains localized in translation.
-- Reitit and a broader middleware stack remain appropriate if the API grows to
-  parameterized routes, route data, versioned endpoints, or many route-specific
-  policies.
+- Ruuter is intentionally a small routing dependency; a broader middleware
+  stack remains appropriate only if the API grows to many route-specific
+  policies. Reitit remains an alternative for a substantially larger route
+  graph, but is not needed alongside Ruuter for this service.
 
 ## Evidence
 
