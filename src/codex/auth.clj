@@ -8,7 +8,8 @@
   (`:access_token`, `:refresh_token`, `:expires_at`, `:account_id`)."
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
-            [jolt.http-client :as http]))
+            [jolt.http-client :as http]
+            [jolt.ffi :as ffi]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -28,22 +29,65 @@
 ;; Credential file load/save
 ;; ---------------------------------------------------------------------------
 
-(defn load-cred
-  "Load `auth.json` into a PMap, or nil if the file is missing/unparseable."
-  [path]
-  (if (.exists (java.io.File. path))
+;; Jolt's java.io.File shim has rename/delete but no permission methods. Bind
+;; the small POSIX surface directly so OAuth refresh tokens never inherit a
+;; permissive umask. Modes are octal: 0700 = 448, 0600 = 384.
+(ffi/defcfn c-chmod "chmod" [:pointer :int] :int)
+
+(def credential-keys
+  [:access_token :refresh_token :expires_at :account_id])
+
+(defn- chmod!
+  [path mode]
+  (let [p (ffi/string->ptr path)]
     (try
-      (json/read-str (slurp path) :key-fn keyword)
-      (catch Throwable _ nil))
-    nil))
+      (when-not (zero? (c-chmod p mode))
+        (throw (ex-info "set credential permissions failed"
+                        {:type :credential-file :operation :chmod :path path})))
+      (finally (ffi/free p)))))
+
+(defn load-cred
+  "Load `auth.json` into a PMap, or nil only when the file is absent. Parse and
+  permission failures are reported instead of being mistaken for logout."
+  [path]
+  (let [f (java.io.File. path)]
+    (when (.exists f)
+      (try
+        (chmod! path 384)
+        (json/read-str (slurp path) :key-fn keyword)
+        (catch Throwable e
+          (throw (ex-info (str "read credentials: " (ex-message e))
+                          {:type :credential-file :operation :read :path path}
+                          e)))))))
 
 (defn save-cred!
-  "Write a credential PMap to `path` atomically-ish (mkdir parent, overwrite)."
+  "Atomically save credential fields using an owner-only directory and file."
   [path cred]
-  (let [f (java.io.File. path)]
-    (when-let [p (.getParentFile f)]
-      (.mkdirs p)))
-  (spit path (str (json/write-str cred) "\n")))
+  (let [target (java.io.File. path)
+        parent (.getParentFile target)
+        tmp-path (str path ".tmp")
+        tmp (java.io.File. tmp-path)
+        payload (select-keys cred credential-keys)]
+    (try
+      (when parent
+        (when-not (or (.exists parent) (.mkdirs parent))
+          (throw (ex-info "create credential directory failed"
+                          {:type :credential-file :operation :mkdir :path (.getPath parent)})))
+        (chmod! (.getPath parent) 448))
+      (spit tmp-path (str (json/write-str payload) "\n"))
+      (chmod! tmp-path 384)
+      (when-not (.renameTo tmp target)
+        (throw (ex-info "replace credential file failed"
+                        {:type :credential-file :operation :rename :path path})))
+      (chmod! path 384)
+      payload
+      (catch Throwable e
+        (when (.exists tmp) (.delete tmp))
+        (if (= :credential-file (:type (ex-data e)))
+          (throw e)
+          (throw (ex-info (str "write credentials: " (ex-message e))
+                          {:type :credential-file :operation :write :path path}
+                          e)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; JWT helpers
@@ -166,4 +210,6 @@
   (let [path (:path @store)]
     (reset! store {:path path :lock (:lock @store)})
     (let [f (java.io.File. path)]
-      (when (.exists f) (.delete f)))))
+      (when (and (.exists f) (not (.delete f)))
+        (throw (ex-info "delete credential file failed"
+                        {:type :credential-file :operation :delete :path path}))))))

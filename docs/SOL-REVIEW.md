@@ -16,20 +16,22 @@ The highest-value remaining work is not a broad rewrite. It is to harden secret
 storage and lifecycle/concurrency behavior, then replace the manual acceptance
 scripts with deterministic tests.
 
-## Priority summary
+## Implementation progress
 
-| Priority | Improvement | Why it matters |
-| --- | --- | --- |
-| P0 | Save credentials atomically with mode `0600` | The refresh token is currently stored in a file observed as mode `0644` |
-| P0 | Make WebSocket pool acquisition/release atomic | Concurrent requests can share, overwrite, or leak a connection |
-| P0 | Guarantee acquired WS connections are released on every failure | A failed first write can leave a pooled session permanently busy |
-| P0 | Report chat stream failures as failures | `stream-chat` can turn an upstream exception into a normal `finish_reason: stop` |
-| P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
-| P1 | Bound and normalize client session IDs and pool cardinality | Client-controlled IDs create pooled connections, state, and timer futures |
-| P1 | Harden OAuth callback handling and cleanup | A wrong-state request currently aborts a valid login; HTML errors are unescaped |
-| P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
-| P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
-| P2 | Correct operational documentation and CLI behavior | Address handling, test claims, and TODO state do not match the source |
+Progress is updated with each atomic implementation commit.
+
+| Status | Priority | Improvement | Why it matters |
+| --- | --- | --- | --- |
+| Done | P0 | Save credentials atomically with mode `0600` | Implemented POSIX mode enforcement, temporary-file rename, explicit read/write/delete errors, and credential-field filtering |
+| Pending | P0 | Make WebSocket pool acquisition/release atomic | Concurrent requests can share, overwrite, or leak a connection |
+| Pending | P0 | Guarantee acquired WS connections are released on every failure | A failed first write can leave a pooled session permanently busy |
+| Pending | P0 | Report chat stream failures as failures | `stream-chat` can turn an upstream exception into a normal `finish_reason: stop` |
+| Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
+| Pending | P1 | Bound and normalize client session IDs and pool cardinality | Client-controlled IDs create pooled connections, state, and timer futures |
+| Pending | P1 | Harden OAuth callback handling and cleanup | A wrong-state request currently aborts a valid login; HTML errors are unescaped |
+| Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
+| Pending | P1 | Validate request shapes and avoid keywordizing arbitrary JSON | Malformed input reaches deep code paths; interned keys may enable memory pressure |
+| Pending | P2 | Correct operational documentation and CLI behavior | Address handling, test claims, and TODO state do not match the source |
 
 ## P0 — security and correctness
 
@@ -37,10 +39,11 @@ scripts with deterministic tests.
 
 **Locations:** `src/codex/auth.clj:29-46`, `src/codex/auth.clj:162-169`
 
-`save-cred!` creates parent directories with their ambient permissions and
-writes directly with `spit`. It neither enforces restrictive permissions nor
-uses a temporary file and rename. On the reviewed machine the live credential
-file was:
+**Status: implemented.** `save-cred!` now filters runtime-only fields, creates
+an owner-only parent directory, writes an owner-only same-directory temporary
+file, and renames it over the target. `load-cred` tightens existing file mode
+and distinguishes absence from corruption; logout reports deletion failure.
+The original review observed:
 
 ```text
 644 user:user ~/.config/chatgpt-openai-api-adapter/auth.json
@@ -55,7 +58,7 @@ in".
 The Go reference already has the desired behavior: create the directory as
 `0700`, write `path.tmp` as `0600`, then atomically rename it.
 
-**Recommended change:**
+**Implemented change:**
 
 1. Serialize only credential fields, never `:path` or `:lock`.
 2. Create the parent directory with owner-only permissions where Jolt exposes
