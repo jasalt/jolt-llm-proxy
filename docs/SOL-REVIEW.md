@@ -23,7 +23,7 @@ Progress is updated with each atomic implementation commit.
 | Status | Priority | Improvement | Why it matters |
 | --- | --- | --- | --- |
 | Done | P0 | Save credentials atomically with mode `0600` | Implemented POSIX mode enforcement, temporary-file rename, explicit read/write/delete errors, and credential-field filtering |
-| Pending | P0 | Make WebSocket pool acquisition/release atomic | Concurrent requests can share, overwrite, or leak a connection |
+| Done | P0 | Make WebSocket pool acquisition/release atomic | Added serialized pool transitions, identity-checked/idempotent release, and idempotent connection close |
 | Pending | P0 | Guarantee acquired WS connections are released on every failure | A failed first write can leave a pooled session permanently busy |
 | Pending | P0 | Report chat stream failures as failures | `stream-chat` can turn an upstream exception into a normal `finish_reason: stop` |
 | Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
@@ -77,9 +77,15 @@ silently accepting world-readable tokens.
 
 ### 2. Serialize all WebSocket pool state transitions
 
+**Status: implemented.** Pool transitions now use a stable lock, release hooks
+are idempotent and connection-identity checked, and connection close is
+idempotent. Concurrent requests cannot both claim one cached reader. Dialing is
+intentionally serialized as a simple correctness-first tradeoff; it can later
+be replaced with reserved entries if handshake throughput requires it.
+
 **Locations:** `src/codex/ws.clj:313-390`
 
-The pool is an atom, but acquisition is a multi-step read/check/dial/write
+The original pool used an atom, but acquisition was a multi-step read/check/dial/write
 sequence. An atom only makes an individual dereference or `swap!` atomic. It
 does not make the overall transaction atomic.
 
