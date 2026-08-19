@@ -1,5 +1,10 @@
 # jolt-codex-sub-proxy
 
+> **Unofficial/private API:** this project talks to ChatGPT Subscription backend
+> endpoints that are not a stable public OpenAI API. They may change without
+> notice. Review applicable service terms and do not expose this proxy as a
+> public multi-user service.
+
 A Clojure-on-Chez (Jolt, non-JVM) port of the
 [`chatgpt-openai-api-adapter`](https://github.com/jasalt/chatgpt-openai-api-adapter)
 Go proxy. It authenticates to the ChatGPT Subscription (Codex) backend and
@@ -13,6 +18,20 @@ history.
 > non-streaming), WebSocket delta continuation, SSE fallback, token refresh,
 > API-key guard, and the `login`/`logout`/`usage`/`info` CLI — see
 > [`TODO.md`](./docs/TODO.md) Phase 7.
+
+## Prerequisites
+
+- Jolt v0.7.16 (the tested version)
+- Linux x86_64 with glibc and system OpenSSL 3
+- Git/network access on first run so Jolt can resolve the exact dependency SHAs
+  pinned in `deps.edn`
+
+Verify the source and deterministic test suite before using live credentials:
+
+```bash
+jolt -e '(require (quote codex.core))'
+jolt -M:test -m codex.test-runner
+```
 
 ## Usage
 
@@ -35,11 +54,20 @@ jolt -m codex.core info     # credentials + JWT claims
 jolt -m codex.core logout
 ```
 
+`CHATGPT_ADAPTER_ADDR` accepts only `127.0.0.1:<port>` or
+`localhost:<port>` because the current Ring adapter is loopback-only. With no
+`CHATGPT_ADAPTER_API_KEY`, every local process can spend the logged-in account's
+allowance. Set a strong key on shared machines. Never put the proxy directly on
+an untrusted network; use an authenticating TLS reverse proxy if remote access
+is unavoidable.
+
 Requests carrying an `X-Session-Id` (or `X-Prompt-Cache-Key`) header are routed
 over pooled WebSocket connections with multi-turn delta continuation; requests
 without one fall back to plain SSE. Credentials live at
 `~/.config/chatgpt-openai-api-adapter/auth.json` (override with
-`CHATGPT_ADAPTER_AUTH_FILE`), shared with the Go original.
+`CHATGPT_ADAPTER_AUTH_FILE`), shared with the Go original. The directory and
+file are maintained with modes `0700` and `0600`; startup tightens an existing
+credential file before reading it.
 
 ## Why Jolt
 
@@ -116,11 +144,12 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
 - [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) — surprising non-JVM quirks
   (tagged-table access, pkill self-match, nREPL persistence, brepl stdout,
   opaque printing).
-- [`JOLT-ISSUES.md`](./docs/JOLT-ISSUES.md) — upstream gaps/bugs to forward
-  (JI-1 brepl stdout discard, JI-2 http-client doc gap, JI-3 superseded
-  misdiagnosis).
-- [`CLOJURE-CONVERGENCE.md`](./docs/CLOJURE-CONVERGENCE.md) — Clojure-language
-  divergences confirmed against Babashka (`bb`).
+- [`JOLT-ISSUES.md`](./docs/JOLT-ISSUES.md) — reviewed upstream reports,
+  including brepl output loss and Jolt's missing base64url shim.
+- [`CLOJURE-CONVERGENCE.md`](./docs/CLOJURE-CONVERGENCE.md) — reviewed
+  Clojure/Jolt convergence observations.
+- [`SOL-REVIEW.md`](./docs/SOL-REVIEW.md) — prioritized implementation review
+  and current remediation progress.
 
 The two most dangerous gotchas: **`jolt.host/tagged-table` does not implement
 `IFn`**, so `(:write st)` on the outbound TLS stream returns `nil` silently —

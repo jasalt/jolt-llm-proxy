@@ -22,10 +22,10 @@ Reuses existing dev credentials at
 These are the things that will silently break code that looks correct to a JVM
 Clojure programmer. Full details in `JOLT-GOTCHAS.md` / `CLOJURE-CONVERGENCE.md`.
 
-### R1 — Two kinds of "map", two accessors. Do not mix them.
+### R1 — Two kinds of "map", two accessors. Do not mix them
 
 | Object | Type | Read with | Write with |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Ring request/response maps (`ring-chez.adapter`) | **PMap** | `(:headers req)`, `(get-in req [:headers "x"])` | `assoc`, `assoc-in` |
 | `jolt.http-client` response (`{:status :headers :body}`) | **PMap** | `(:status r)`, `(:body r)` | — |
 | `clojure.data.json` parse result (with `:key-fn keyword`) | **PMap** | `(:access_token auth)` | — |
@@ -44,7 +44,7 @@ Clojure programmer. Full details in `JOLT-GOTCHAS.md` / `CLOJURE-CONVERGENCE.md`
 If you see "class nil cannot be cast to class clojure.lang.IFn", you almost
 certainly used the wrong accessor on the wrong type. Check R1 first.
 
-### R2 — `java.*` classes are used by **direct interop**, never `require`.
+### R2 — `java.*` classes are used by **direct interop**, never `require`
 
 ```clojure
 ;; RIGHT — no require, just use the class:
@@ -67,6 +67,7 @@ but byte/char offsets are not the same — for byte work use `byte-array`).
 **Base64 shim gap:** `java.util.Base64/getUrlDecoder` and `/getUrlEncoder` are
 **NOT** in the shim (only `getEncoder`/`getDecoder`, standard base64). For
 base64url (JWT payloads) convert first:
+
 ```clojure
 (defn b64url->b64std [s]
   (let [pad (mod (- 4 (mod (count s) 4)) 4)]
@@ -75,7 +76,7 @@ base64url (JWT payloads) convert first:
 (.decode (java.util.Base64/getDecoder) (.getBytes (b64url->b64std part) "UTF-8"))
 ```
 
-### R3 — nREPL process: keep it alive, reload with `:reload`.
+### R3 — nREPL process: keep it alive, reload with `:reload`
 
 ```bash
 # Start once (stdin MUST come from /dev/null, or the tool call reaps it):
@@ -97,12 +98,13 @@ ss -ltn | grep 7888 && cat .nrepl-port
 - Wrap risky top-level forms in `(try … (catch Throwable e {:err (ex-message e) :data (ex-data e)}))`
   so `brepl -f` returns a data map instead of `nil`.
 
-### R4 — Outbound TLS + WebSocket: use the proven recipe.
+### R4 — Outbound TLS + WebSocket: use the proven recipe
 
 `jolt.http.tls/tls-connect` works **unmodified**. The full
 `wss://chatgpt.com/backend-api/codex/responses` handshake
 (`101 Switching Protocols` + valid `sec-websocket-accept`) is proven in
 `ws_handshake.clj` — read it as the reference. Key points:
+
 - `(def st (tls/tls-connect "chatgpt.com" 443 false 20000 20000))`
 - `(def wfn (jolt.host/ref-get st :write))` / `(def rfn (jolt.host/ref-get st :read))`
 - `(wfn st (.getBytes req "ISO-8859-1"))` — `wfn` is `(fn [self data] …)`,
@@ -113,7 +115,7 @@ ss -ltn | grep 7888 && cat .nrepl-port
   (verified, both load orders). There is **no FFI load-order contamination** —
   that was a misdiagnosis (see `JOLT-ISSUES.md` JI-3).
 
-### R5 — JSON.
+### R5 — JSON
 
 `(require '[clojure.data.json :as json])`. `(json/read-str s :key-fn keyword)`
 → PMap with keyword keys. `(json/write-str m)` → string. For parsing arrays
@@ -121,14 +123,14 @@ of objects, `(json/read-str s :key-fn keyword)` returns a Clojure vector of
 PMaps. `json/read-str` keys are strings by default — **always pass
 `:key-fn keyword`** unless you want string keys.
 
-### R6 — `previous_response_id` / `store:false` are required on the WS transport.
+### R6 — `previous_response_id` / `store:false` are required on the WS transport
 
 The Codex WebSocket endpoint **rejects `store:true`**. Every WS request body
 must set `"store" false` and `"stream" true`. `previous_response_id` is added
 by the continuation logic (Phase 3). A client-supplied `previous_response_id`
 is passed through unchanged and the proxy's delta logic defers to it.
 
-### R7 — Source roots & deps.
+### R7 — Source roots & deps
 
 `deps.edn` has `:paths ["src"]`. Namespaces live under `src/codex/*.clj` as
 `codex.auth`, `codex.ws`, `codex.continuation`, `codex.translate`,
@@ -167,7 +169,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 
 ---
 
-## Phase 1 — `codex.auth` (token store + refresh) — IN PROGRESS
+## Phase 1 — `codex.auth` (token store + refresh) — DONE ✓
 
 **Goal:** load `auth.json`, refresh the OAuth access token when expired, expose
 `[token account-id]` to the rest of the proxy. Mirror Go `auth.go`
@@ -178,6 +180,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 **Sub-items** (do in order, each is a single `defn` you can test in isolation):
 
 1. **Constants** (top of file):
+
    ```clojure
    (def client-id "app_EMoamEEZ73f0CkXaXp7hrann")
    (def auth-base-url "https://auth.openai.com")
@@ -185,6 +188,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
    (def default-auth-path
      (str (or (System/getenv "HOME") ".") "/.config/chatgpt-openai-api-adapter/auth.json"))
    ```
+
    Read env override: `(or (System/getenv "CHATGPT_ADAPTER_AUTH_FILE") default-auth-path)`.
 
 2. **`load-cred [path]`** → PMap or `nil` if file missing.
@@ -220,6 +224,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
    seconds). Fallback `(+ (System/currentTimeMillis) (* 60 60 1000))`.
 
 7. **`refresh-token! [cred]`** → new cred PMap.
+
    ```clojure
    (defn refresh-token! [cred]
      (let [resp (http/post (str auth-base-url "/oauth/token")
@@ -240,6 +245,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
          {:access_token access :refresh_token refresh
           :expires_at expires-at :account_id account})))
    ```
+
    Requires `(require '[jolt.http-client :as http])` at top — and per R4 the
    `jolt.http.tls`/crypto libs must be loaded for HTTPS; requiring
    `jolt.http-client` pulls them. Verified working: a real refresh returns 200.
@@ -257,15 +263,18 @@ is passed through unchanged and the proxy's delta logic defers to it.
    - `(logout! [store])` — clear atom, delete file.
 
 **Acceptance:**
-```
+
+```console
 brepl -f src/codex/auth.clj
 brepl '(in-ns (quote codex.auth)) (def s (start! default-auth-path)) (println "acct:" (:account_id @s)) (println "token-len:" (count (:access_token @s))) (println "forced refresh:" (count (first (token s :force true))))'
 ```
+
 Must print a non-empty `account_id`, a token length ~1700+, and a refreshed
 token length ~1700+. `account_id` must match the `account_id` in `auth.json`
 (they come from the same JWT).
 
 **Common mistakes:**
+
 - Using `(:write …)` on the http-client response — it's a PMap, that's correct
   here; the trap is the *opposite* (using `ref-get` on a PMap).
 - Forgetting `:throw-exceptions false` on the POST (default throws on 4xx/5xx).
@@ -287,6 +296,7 @@ ping/pong/close, and a per-session connection pool with idle TTL. Mirror Go
 **Sub-items:**
 
 ### 2a — Constants & handshake key
+
 ```clojure
 (def ws-beta-header "responses_websockets=2026-02-06")
 (def ws-url "wss://chatgpt.com/backend-api/codex/responses")
@@ -295,6 +305,7 @@ ping/pong/close, and a per-session connection pool with idle TTL. Mirror Go
 (def ws-session-max-age-ms (* 55 60 1000))
 (def ws-idle-ttl-ms (* 5 60 1000))
 ```
+
 - `handshake-key []` → 16 random bytes base64-std-encoded:
   `(let [b (byte-array 16)] (.nextBytes (java.security.SecureRandom.) b)
    (.encodeToString (java.util.Base64/getEncoder) b))`
@@ -302,12 +313,14 @@ ping/pong/close, and a per-session connection pool with idle TTL. Mirror Go
   `(let [d (java.security.MessageDigest/getInstance "SHA-1")] (.update d (.getBytes (str key ws-guid) "UTF-8")) (.encodeToString (java.util.Base64/getEncoder) (.digest d)))`
 
 ### 2b — `dial [token account-id session-id]` → `{:stream :handshake-data}`
+
 Build the upgrade request exactly like `ws_handshake.clj` (copy that string),
 with headers:
 `Authorization: Bearer <token>`, `ChatGPT-Account-Id: <account-id>`,
 `OpenAI-Beta: responses_websockets=2026-02-06`, `originator: pi`,
 `User-Agent: chatgpt-openai-api-adapter/1`, `session-id: <session-id>`,
 `x-client-request-id: <session-id>`, plus `Upgrade/Connection/Sec-WebSocket-Key/Sec-WebSocket-Version`.
+
 - `(def st (tls/tls-connect "chatgpt.com" 443 false 20000 20000))`
 - `(wfn st (.getBytes req "ISO-8859-1"))`
 - Read the HTTP/1.1 101 response by looping `(rfn st nil)` until the accumulated
@@ -319,8 +332,10 @@ with headers:
 - Return `{:stream st :session-id session-id :created-at (System/currentTimeMillis) :leftover <byte-array-or-nil>}`.
 
 ### 2c — `write-frame [conn opcode payload]` (client→server, MUST mask)
+
 `conn` carries `:stream` and a `:write-lock` (Object to `locking` on — frames
 must not interleave). Build the header per RFC 6455 §5.2/§5.3:
+
 - byte0: `(bit-or 0x80 opcode)` (FIN=1).
 - byte1: length 7/16/64-bit with the high mask bit `0x80` set (client masking).
   - `n < 126`: byte1 = `(bit-or 0x80 n)`, no extra length bytes.
@@ -334,9 +349,11 @@ must not interleave). Build the header per RFC 6455 §5.2/§5.3:
 - `write-close [conn]` → `write-frame` opcode `0x8` empty payload.
 
 ### 2d — `read-message [conn]` (server→client; defragment; handle control frames)
+
 Maintain a `:leftover` byte buffer on `conn` (from handshake + prior reads).
 `read-frame` reads ≥2 bytes; parse FIN, opcode, masked, length (7/16/64), mask,
 payload. Server frames are typically **unmasked** but handle mask if present.
+
 - opcode `0x8` close → return `{:type :close}`.
 - opcode `0x9` ping → `write-frame` opcode `0xA` with the ping payload, recur.
 - opcode `0xA` pong → ignore, recur.
@@ -355,13 +372,16 @@ payload. Server frames are typically **unmasked** but handle mask if present.
   Empty/non-JSON messages are skipped (recur) per Go `readWebSocket`.
 
 ### 2e — `read-until-terminal [conn emit]`
+
 Loop `read-event`, call `(emit event)` for each, stop on terminal types:
 `"response.completed"`, `"response.done"`, `"response.incomplete"`,
 `"response.failed"`, `"error"`. Returns when terminal (so the socket can be
 released to the pool). Mirror Go `readWebSocket`.
 
 ### 2f — Per-session pool
+
 `(def pool (atom {}))` keyed by session-id → conn map. Mirror Go `sessionPool`:
+
 - `acquire [pool session-id header-builder]` → `{:conn :reused :release}`:
   - If `session-id` empty → one-off: dial, `release` = close.
   - If cached & not busy & not too old (`< ws-session-max-age-ms`) → mark busy,
@@ -379,16 +399,19 @@ released to the pool). Mirror Go `readWebSocket`.
   `:continuation`).
 
 **Acceptance:**
-```
+
+```console
 brepl -f src/codex/ws.clj
 brepl '(in-ns (quote codex.ws)) (require (quote [clojure.data.json :as json])) (def auth (json/read-str (slurp "/home/user/.config/chatgpt-openai-api-adapter/auth.json") :key-fn keyword)) (def conn (dial (:access_token auth) (:account_id auth) "wstest02")) (println "dial ok:" (some? (:stream conn))) (println "accept ok:" (:accept-ok conn)) (write-text conn (json/write-str {:type "response.create" :model "gpt-5.4" :input [{:role "user" :content "say hi in one word"}] :stream true :store false})) (def events (atom [])) (read-until-terminal conn (fn [e] (swap! events conj (:type e)))) (println "event types:" (take 8 @events)) (write-close conn)'
 ```
+
 Must print `dial ok: true`, `accept ok: true`, and an event-types list
 containing `"response.completed"` (or `response.done`). The model name must be
 one a current Codex subscription accepts (check `modelIDs` in Go `proxy.go`;
 `gpt-5.4` is in the list).
 
 **Common mistakes:**
+
 - Forgetting the client MUST mask outbound frames (server will close the
   connection otherwise).
 - Losing leftover bytes after the HTTP 101 — those are WS frames.
@@ -468,6 +491,7 @@ prefix match is load-bearing.
 
 **Acceptance:** write `src/codex/continuation.clj`, then a small test file
 `test_continuation.clj` that requires it and asserts:
+
 - A 2-turn chat: turn-1 body has `input [{:role user :content "hi"}]`; turn-2
   has `input [{:role user :content "hi"} {:role assistant :content "hello"} {:role user :content "how are you"}]`;
   `cont` = `{:last-request-body turn1-body :last-response-id "resp_1"
@@ -475,12 +499,15 @@ prefix match is load-bearing.
   `build-delta-request` returns `ok? true` and `:input` = the last user item
   only, with `:previous_response_id "resp_1"`.
 - An unrelated turn-2 (different `:instructions`) → `ok? false`.
-```
+
+```console
 brepl -f test_continuation.clj
 ```
+
 Must print `PASS` for both cases.
 
 **Common mistakes:**
+
 - Making the assistant prefix match strict (will fail continuation whenever the
   client's streamed text differs from the server's stored text — which it
   often does due to truncation/whitespace).
@@ -529,14 +556,17 @@ normalize `/v1/responses` bodies for the upstream. Mirror Go `translate.go`
    — direct ports. `content-text` joins `:text` parts with `"\n"`.
 
 **Acceptance:**
-```
+
+```console
 brepl -f src/codex/translate.clj
 brepl '(in-ns (quote codex.translate)) (def [req model stream] (chat-to-responses (json/write-str {:model "gpt-5.4" :messages [{:role "system" :content "be brief"} {:role "user" :content "hi"}] :stream true}))) (println "model:" model "stream:" stream "store:" (:store req) "instructions:" (:instructions req) "input:" (:input req))'
 ```
+
 Must print `model: gpt-5.4 stream: true store: false instructions: be brief
 input: [{:role user :content "hi"}]`.
 
 **Common mistakes:**
+
 - Setting `:store true` (must be false — R6).
 - Dropping `:previous_response_id` in `prepare-responses` (must pass through).
 - Forgetting `:key-fn keyword` on `json/read-str` (then keys are strings and
@@ -560,23 +590,28 @@ output. Mirror Go `proxy.go` (`proxyServer.routes`, `chat`, `responses`,
 **Sub-items:**
 
 ### 5a — Handler var + routes
+
 Define `(defonce handler (fn [req] ...))` and **redefine it via a function**
 so `#'handler` passed to `run-server` picks up redefs. Pattern:
+
 ```clojure
 (defn app [req] (routes req))   ;; the real logic
 (def handler #'app)             ;; var, so redef of `app` is live
 ```
+
 Actually simpler: pass `#'handler` where `handler` is a `defn` you redef.
 Route on `(:request-method req)` and `(:uri req)` (R1: PMap, keyword access ok).
 Return Ring response PMaps: `{:status 200 :headers {"Content-Type" "application/json"} :body (json/write-str …)}`.
 
 ### 5b — API-key guard
+
 Read `CHATGPT_ADAPTER_API_KEY` env. If set, compare
 `(get-in req [:headers "authorization"])` (header names are **lower-cased**
 by ring-chez — verify with a probe) after stripping `"Bearer "`. Constant-time
 compare is nice but not required for the port; `=` is fine.
 
 ### 5c — Prompt-cache key
+
 `resolve-session-id [req default]`: check headers `"x-session-id"` then
 `"x-prompt-cache-key"` (lower-cased), return clamped to 64 codepoints
 (`(subs key 0 (min 64 (count key)))` — `count` is codepoints on jolt, which is
@@ -584,6 +619,7 @@ correct here). `apply-prompt-cache-key [request key]`: assoc `:prompt_cache_key`
 if not already present.
 
 ### 5d — SSE transport (`sse-source`)
+
 POST to `https://chatgpt.com/backend-api/codex/responses` via
 `jolt.http-client/request` (NOT `http/post` — you need `:as :stream` or raw
 body access). **Check clj-http-lite streaming support**: if `:as :stream`
@@ -594,11 +630,13 @@ Headers: `Authorization`, `ChatGPT-Account-Id`, `Content-Type application/json`,
 `User-Agent`, `session-id`, `x-client-request-id`.
 
 ### 5e — `read-sse [src emit]`
+
 Parse `event:`/`data:` lines into `{:name :data}` and call `(emit event)`.
 Mirror Go `readSSE`. `[DONE]` ends. If working from a full string (not a
 stream), `clojure.string/split` on `"\n"`.
 
 ### 5f — WS transport (`ws-source [ctx request session-id for-chat]`)
+
 - `acquire` from `pool` (Phase 2) with a header-builder that calls
   `(codex.auth/token store)` for `[token account-id]`.
 - Read `:continuation` off the conn; if present, `build-delta-request` (Phase 3);
@@ -612,11 +650,14 @@ stream), `clojure.string/split` on `"\n"`.
   and `release true`; else clear `:continuation` and `release false`.
 
 ### 5g — `open-event-source [ctx request session-id for-chat]`
+
 WS only when `session-id` non-empty and `!=` proxy default (per Go
 `openEventSource`); else SSE. On WS dial failure, log + SSE fallback.
 
 ### 5h — Collectors
+
 Port `chatCollector` as an atom or PMap accumulator:
+
 - `consume-chat [acc event emit]` handles `response.output_text.delta`,
   `response.reasoning_summary_text.delta`/`response.reasoning_text.delta`,
   `response.output_item.added`/`.done`, `response.function_call_arguments.delta`/`.done`,
@@ -627,6 +668,7 @@ Port `chatCollector` as an atom or PMap accumulator:
 - `response-meta [acc]` → `{:response-id :items :completed :incomplete}`.
 
 ### 5i — Streaming responses to the client
+
 Use `ring-chez.sse/event-response` + a `clojure.core.async` channel:
 the handler returns `{:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache" "X-Accel-Buffering" "no"} :body ch}`,
 and a spawned thread `(async/thread …)` runs the collector, calling
@@ -635,17 +677,20 @@ and `(async/close! ch)` at the end. For non-stream, collect fully then return
 a JSON PMap body.
 
 **Acceptance:**
-```
+
+```console
 brepl -f src/codex/proxy.clj
 # Then via curl against the running server (Phase 6 starts it):
 curl -sN http://127.0.0.1:8080/health
 curl -sN http://127.0.0.1:8080/v1/models
 curl -sN -H 'Content-Type: application/json' -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"say hi in one word"}],"stream":true}' http://127.0.0.1:8080/v1/chat/completions
 ```
+
 `/health` → `{"status":"ok"}`. `/v1/models` → a list with `gpt-5.4`. The chat
 curl must stream `data: {...}` chunks ending in `data: [DONE]`.
 
 **Common mistakes:**
+
 - Using `ref-get` on the Ring request map (R1 — it's a PMap).
 - Header names: ring-chez lower-cases them; `(get-in req [:headers "X-Session-Id"])`
   returns nil — use `"x-session-id"`.
@@ -689,17 +734,20 @@ curl must stream `data: {...}` chunks ending in `data: [DONE]`.
    be stubbed initially — mark in TODO — the Go versions exist for reference.)
 
 **Acceptance:**
-```
+
+```console
 brepl -f src/codex/core.clj
 brepl '(require (quote codex.core)) (codex.core/start! :port 8080 :auth-path codex.auth/default-auth-path)'
 curl -sN http://127.0.0.1:8080/health
 brepl '(codex.core/stop!)'
 ```
+
 `/health` returns `{"status":"ok"}`. Live reload: edit `codex/proxy.clj`, run
 `brepl '(require (quote codex.proxy) :reload)'`, hit `/health` again —
 new code is live without restarting the server.
 
 **Common mistakes:**
+
 - Passing `codex.proxy/handler` (the value) instead of `#'codex.proxy/handler`
   (the var) → live reload silently broken.
 - Letting the nREPL process die (R3) → `start!` server dies with it.
@@ -746,6 +794,7 @@ Each sub-item: write the exact `curl`/`brepl` command and the assertion in
 `test_e2e.clj`. Print `PASS`/`FAIL` per case.
 
 **Common mistakes:**
+
 - Trusting "it returned 200" without checking `cached` grew (7.3) — that's the
   feature under test.
 - Running parallel sessions on the **same** `X-Session-Id` (they share one WS
@@ -756,12 +805,12 @@ Each sub-item: write the exact `curl`/`brepl` command and the assertion in
 
 ## Phase 8 — Docs, issues, polish
 
-- [ ] Keep `README.md` current with the real architecture + usage (commands,
-  env vars, the `ref-get` vs PMap rule R1).
-- [ ] Confirm `CLOJURE-CONVERGENCE.md` CONV-2 (`ex-data` on host ex-info) with
-  a focused `bb` comparison; file upstream if confirmed.
-- [ ] Review `JOLT-ISSUES.md` JI-1/JI-2 for forwarding (brepl stdout discard;
-  http-client TLS stream doc gap).
+- [x] Keep `README.md` current with architecture, usage, configuration, tests,
+  security assumptions, and the `ref-get` vs PMap rule R1.
+- [x] Review `CLOJURE-CONVERGENCE.md` CONV-2; direct Jolt/Babashka checks match,
+  so the previous `ex-data` concern is not reportable.
+- [x] Review `JOLT-ISSUES.md` candidates and separate actionable reports from
+  documentation improvements and disproved hypotheses.
 - [x] Implement `login`/`logout`/`usage`/`info` CLI commands (port Go
   `interactiveLogin`, `deviceLogin`, `codexUsage`, `codexInfo`) — done in
   `src/codex/cli.clj`: browser PKCE login (localhost:1455 callback server),
@@ -770,7 +819,8 @@ Each sub-item: write the exact `curl`/`brepl` command and the assertion in
   login; the OAuth callback handler is unit-verified (state mismatch, error,
   missing-code, success paths) and the device usercode endpoint returns a
   valid code request. `-main` dispatches serve|login|logout|usage|info.
-- [ ] Atomic commits per phase (the `.git` is in this dir).
+- [x] Atomic commits per remediation item; implementation progress is tracked
+  in `SOL-REVIEW.md`.
 
 ---
 
