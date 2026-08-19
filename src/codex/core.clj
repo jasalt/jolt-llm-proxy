@@ -54,7 +54,8 @@
                              :stop-server stop-server)]
           (reset! system running)
           (println (str "Proxy listening on http://127.0.0.1:" port))
-          (println (str "  session-id: " session-id))
+          ;; Correlate sessions via a short hash; never log the raw id.
+          (println (str "  session-id: " (id/short-hash session-id) " (hashed)"))
           (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
           running)
         (catch Throwable e
