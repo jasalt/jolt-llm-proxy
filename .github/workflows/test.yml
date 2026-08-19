@@ -17,10 +17,15 @@ jobs:
           persist-credentials: false
       - name: Install Jolt
         run: |
-          release=https://github.com/jolt-lang/jolt/releases/download/v0.7.16
-          curl -fsSL "$release/jolt-linux-x86_64" -o jolt
-          chmod +x jolt
-          sudo mv jolt /usr/local/bin/jolt
+          version=0.7.16
+          release=https://github.com/jolt-lang/jolt/releases/download/v${version}
+          curl -fsSL "$release/jolt-v${version}-x86_64-linux.tar.gz" -o jolt.tar.gz
+          mkdir jolt-dist
+          tar -xzf jolt.tar.gz -C jolt-dist
+          jolt_bin=$(find jolt-dist -type f -name jolt -perm -u+x -print -quit)
+          test -n "$jolt_bin"
+          sudo install "$jolt_bin" /usr/local/bin/jolt
+          jolt --version
       - name: Load production namespaces
         run: >-
           jolt -e '(doseq [n (quote [llm-proxy.core llm-proxy.id llm-proxy.proxy
