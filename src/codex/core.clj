@@ -5,7 +5,8 @@
             [codex.auth :as auth]
             [codex.ws :as ws]
             [codex.proxy :as proxy]
-            [codex.cli :as cli]))
+            [codex.cli :as cli]
+            [codex.id :as id]))
 
 ;; ---------------------------------------------------------------------------
 ;; System atom
@@ -13,17 +14,8 @@
 
 (defonce system (atom nil))
 
-(defn- random-session-id
-  "16 random bytes, hex-encoded, clamped to 64 codepoints."
-  []
-  (let [b (byte-array 16)]
-    (.nextBytes (java.security.SecureRandom.) b)
-    (loop [i 0 s (StringBuilder.)]
-      (if (>= i 16)
-        (let [raw (.toString s)]
-          (subs raw 0 (min 64 (count raw))))
-        (recur (inc i)
-               (.append s (format "%02x" (bit-and (aget b i) 0xFF))))))))
+(defn- random-session-id []
+  (id/random-hex 16))
 
 ;; ---------------------------------------------------------------------------
 ;; Start / stop

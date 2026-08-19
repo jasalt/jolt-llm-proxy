@@ -460,6 +460,11 @@ usable when persistence fails and communicate that state clearly.
 
 ### 15. Remove duplication and use idiomatic data transformations
 
+**Status: in progress.** Cryptographic hex ID generation is centralized in
+`codex.id/random-hex`, and continuation normalization now uses immutable
+`dissoc` rather than an atom/doseq map rebuild. The collector decomposition
+from item 9 remains the largest outstanding style improvement.
+
 Examples:
 
 - Random hexadecimal ID generation appears in both `codex.core` and

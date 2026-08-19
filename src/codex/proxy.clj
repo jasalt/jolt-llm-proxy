@@ -12,7 +12,8 @@
             [codex.ws :as ws]
             [codex.continuation :as cont]
             [codex.translate :as tr]
-            [codex.transport.sse :as transport-sse]))
+            [codex.transport.sse :as transport-sse]
+            [codex.id :as id]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.
@@ -42,15 +43,6 @@
    :body (json/write-str {:error {:message message
                                   :type "invalid_request_error"
                                   :code code}})})
-
-(defn- random-id []
-  (let [b (byte-array 16)]
-    (.nextBytes (java.security.SecureRandom.) b)
-    (loop [i 0 s (StringBuilder.)]
-      (if (>= i 16)
-        (.toString s)
-        (recur (inc i)
-               (.append s (format "%02x" (bit-and (aget b i) 0xFF))))))))
 
 (defn normalize-session-id
   "Validate and clamp a client session/cache identifier before it becomes a
@@ -316,7 +308,7 @@
                {:completion_tokens_details (get usage :output_tokens_details)})))))
 
 (defn stream-chat [read-fn model ch]
-  (let [id (str "chatcmpl-" (random-id))
+  (let [id (str "chatcmpl-" (id/random-hex 16))
         created (long (/ (System/currentTimeMillis) 1000))
         collector (atom (new-chat-collector))
         emit (fn [delta]
@@ -383,7 +375,7 @@
                                (if (= (.length (:text c)) 0)
                                  {:tool_calls calls :content nil}
                                  {:tool_calls calls}))))]
-        [{:id (str "chatcmpl-" (random-id))
+        [{:id (str "chatcmpl-" (id/random-hex 16))
           :object "chat.completion"
           :created (long (/ (System/currentTimeMillis) 1000))
           :model model

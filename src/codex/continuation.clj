@@ -61,11 +61,7 @@
           (let [t (content-parts-text content)]
             {:role role :content (if (= t "") "" t)})
           :else {:role role :content ""}))
-      (let [out (atom {})]
-        (doseq [[k v] item]
-          (when (not= k :status)
-            (swap! out assoc k v)))
-        @out))))
+      (dissoc item :status))))
 
 (defn normalize-input-list
   "Normalize a vector of input items (same length as input)."
