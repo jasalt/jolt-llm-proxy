@@ -1,0 +1,133 @@
+# JOLT-GOTCHAS.md
+
+Surprising, under-documented differences in Jolt (Clojure-on-Chez, non-JVM)
+platform behavior encountered while building this proxy. Each entry has a
+repro and the workaround we adopted. Forward-worthy items are also mirrored
+in `JOLT-ISSUES.md` when they look like upstream gaps rather than intended
+divergence.
+
+---
+
+## 1. Host tagged-tables are NOT `IFn` — keyword-as-function and `get` return `nil`
+
+**Surprise.** On JVM Clojure a persistent map (`clojure.lang.IPersistentMap`)
+implements `IFn`, so `(:a m)` calls `(.valAt m :a)`. A Jolt *host tagged-table*
+(`jolt.host/tagged-table`) is **not** `IFn`:
+
+```clojure
+(def tt (jolt.host/tagged-table :jolt/x))
+(jolt.host/ref-put! tt :a 1)
+(ifn? tt)   ;; => false
+(get tt :a) ;; => nil   (NOT 1)
+(:a tt)     ;; => nil   (NOT 1)
+```
+
+The table's fields are readable **only** through `jolt.host/ref-get`:
+
+```clojure
+(jolt.host/ref-get tt :a) ;; => 1
+```
+
+**Impact.** This is silent: no exception, just `nil`. Any code copied from JVM
+Clojure that destructures or keyword-calls a host object (`(:headers req)`,
+`(:write stream)`, `(:body resp)`, …) will quietly read `nil` and then fail
+much later as "nil cannot be cast to class clojure.lang.IFn" when the `nil` is
+eventually invoked.
+
+**Where it bit us.** The `jolt-lang/http-client` TLS stream is a host
+tagged-table (`:jolt/tls-stream`) carrying `:write`/`:read`/`:close` closures.
+Writing `(:write st)` returns `nil`; the upstream `jolt.http.platform` namespace
+deliberately wraps every access in `(jolt.host/ref-get stream :write)`. Copying
+JVM-style `(let [w (:write st)] (w st data))` reproduces the crash in both
+`jolt -e` and `nrepl-server`.
+
+**Workaround.** Always use `jolt.host/ref-get` / `ref-put!` for host tagged-tables.
+Wrap with a small helper if ergonomics matter:
+
+```clojure
+(defn tget [t k] (jolt.host/ref-get t k))
+(defn tput! [t k v] (jolt.host/ref-put! t k v))
+```
+
+**Caveat for Ring handlers.** `ring-chez.adapter` delivers request maps as host
+tagged-tables too. A handler written `(:headers req)` returns `nil`; use
+`(jolt.host/ref-get req :headers)`. (Confirm the exact shape per adapter
+version before relying on this — see `JOLT-ISSUES.md`.)
+
+---
+
+## 2. `pkill -f 'jolt nrepl-server'` kills your own shell
+
+Not a Jolt bug, but it cost hours. `pkill -f` matches the **full command line**
+of every process, including the bash invocation that is running your
+`pkill ... && nohup jolt nrepl-server ...` command (that line literally contains
+the string `jolt nrepl-server`). The shell suicides and the tool call returns
+`(no output)` with no error.
+
+**Workaround.** Kill by PID:
+
+```bash
+PID=$(ps -eo pid,args | grep 'jolt nrepl-server' | grep -v grep | awk '{print $1}')
+[ -n "$PID" ] && kill "$PID"
+```
+
+Never `pkill -f <pattern>` where `<pattern>` is a substring of the command
+issuing the pkill.
+
+---
+
+## 3. nREPL background-process persistence
+
+`jolt nrepl-server 7888` started with `nohup ... & </dev/null` from a tool shell
+survives across tool calls only if stdin is redirected from `/dev/null` and the
+process is detached from the shell's process group. A bare `&` with the shell's
+stdin still attached can die when the tool call's process group is reaped.
+
+**Workaround.**
+
+```bash
+nohup jolt nrepl-server 7888 >/tmp/jolt-nrepl.log 2>&1 </dev/null &
+```
+
+Verify with `ps -eo pid,args | grep 'jolt nrepl-server'` and `ss -ltn | grep 7888`
+before trusting `.nrepl-port`.
+
+---
+
+## 4. `brepl -f <file>` discards buffered `println` stdout on eval error
+
+When a file evaluated via `brepl -f` throws, brepl reports the exception
+message (and nothing else) and any `println`/stdout emitted **before** the
+throw is lost. `ex-data` is not shown. There is no stack trace.
+
+```
+$ brepl -f throwtest.clj      # (println "X") then (throw (ex-info "boom" {:k 1}))
+boom
+Exception: boom
+```
+
+`jolt -e '(load-file "throwtest.clj")'` on the same file prints the `println`
+output, the message, **and** `ex-data: {:k 1}` with a trace — so it is the
+reliable debugging path.
+
+**Workaround.** Develop the risky form with `jolt -e '(load-file "x.clj")'`
+first (real traces + flushed stdout), then move to `brepl -f` once it loads
+clean. For `brepl -f` specifically, wrap the top-level form in
+`(try ... (catch Throwable e ...))` returning a data map
+(`{:err (ex-message e) :data (ex-data e)}`) so the result survives.
+
+See `JOLT-ISSUES.md` JI-1.
+
+---
+
+## 5. Host tagged-tables print opaquely as `#object[...]` / type `:object`
+
+`(type tt)` on a tagged-table returns `:object`, not a class symbol, and the
+table's keys/values are not shown by `pr`. This makes debugging request/stream
+shapes by eye impossible without `(jolt.host/ref-get tt k)` probes.
+
+**Workaround.** A small dumper:
+
+```clojure
+(defn dump-tt [t] (into {} (map (fn [k] [k (jolt.host/ref-get t k)])) [:headers :body :write :read :close :sock]))
+```

@@ -1,0 +1,13 @@
+{:paths ["src"]
+ :deps {jolt-lang/ring-chez-adapter
+        {:git/url "https://github.com/jolt-lang/ring-chez-adapter"
+         :git/sha "665508bbf329bc046fa06bca1ed9cebee257686b"}
+        jolt-lang/http-client
+        {:git/url "https://github.com/jolt-lang/http-client"
+         :git/sha "6faba3570378df91c2c84a588a262b732f4f1858"}
+        clojure/data.json
+        {:git/url "https://github.com/clojure/data.json"
+         :git/sha "94463ffb54482427fd9b31f264b06bff6dcfd557"}
+        io.github.jolt-lang/time
+        {:git/url "https://github.com/jolt-lang/time"
+         :git/sha "89b2e288bd0c6d8ba402cfb52e75652355201441"}}}
