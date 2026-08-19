@@ -308,11 +308,16 @@ exact owned resources. Avoid globally shared pools across start/stop cycles.
 
 ### 9. Split transport, collection, and routing
 
-**Location:** `src/codex/proxy.clj` (627 lines)
+**Status: in progress.** Outbound HTTP, 401 retry, SSE parsing, and source
+cleanup now live in `codex.transport.sse` with focused parser tests. Runtime
+injection was completed in item 8. WS source lifecycle, collectors, and Ring
+routes still need extraction in similarly bounded commits.
 
-The namespace currently owns configuration, auth middleware, routes, outbound
+**Location:** `src/codex/proxy.clj`
+
+The namespace originally owned configuration, auth middleware, routes, outbound
 HTTP, SSE parsing, WS lifecycle, two stateful event collectors, streaming, and
-response formatting. This is the main maintainability hotspot.
+response formatting. This was the main maintainability hotspot.
 
 A useful split is:
 

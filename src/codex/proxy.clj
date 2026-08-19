@@ -8,16 +8,14 @@
             [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
-            [jolt.http-client :as http]
             [codex.auth :as auth]
             [codex.ws :as ws]
             [codex.continuation :as cont]
-            [codex.translate :as tr]))
+            [codex.translate :as tr]
+            [codex.transport.sse :as transport-sse]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.
-
-(def upstream-responses-url "https://chatgpt.com/backend-api/codex/responses")
 
 (def model-ids
   ["gpt-5.3-codex-spark" "gpt-5.4" "gpt-5.4-mini" "gpt-5.5"
@@ -114,69 +112,6 @@
      :body (json/write-str {:object "list" :data data})}))
 
 ;; ---------------------------------------------------------------------------
-;; SSE upstream + reader
-;; ---------------------------------------------------------------------------
-
-(defn upstream-sse [runtime body session-id]
-  (let [store (:store runtime)
-        http-post (or (:http-post runtime) http/post)
-        payload (json/write-str body)]
-    (loop [attempt 0]
-      (let [[token account-id] (auth/token store :force (= attempt 1))
-            resp (http-post upstream-responses-url
-                    {:body payload
-                     :content-type "application/json"
-                     :accept "text/event-stream"
-                     :throw-exceptions false
-                     :headers {"Authorization" (str "Bearer " token)
-                               "ChatGPT-Account-Id" account-id
-                               "OpenAI-Beta" "responses=experimental"
-                               "originator" "pi"
-                               "User-Agent" "chatgpt-openai-api-adapter/1"
-                               "session-id" session-id
-                               "x-client-request-id" session-id}})]
-        (cond
-          (and (= attempt 0) (= (:status resp) 401))
-          (do (when (instance? java.io.InputStream (:body resp))
-                (.close ^java.io.InputStream (:body resp)))
-              (recur 1))
-          (>= (:status resp) 400)
-          (do (when (instance? java.io.InputStream (:body resp))
-                (.close ^java.io.InputStream (:body resp)))
-              (throw (ex-info (str "upstream HTTP " (:status resp))
-                              {:status (:status resp) :body (:body resp)})))
-          :else (:body resp))))))
-
-(defn- dispatch-sse [event data emit]
-  (when (seq data)
-    (let [raw (str/join "\n" data)]
-      (when (not= raw "[DONE]")
-        (let [obj (json/read-str raw :key-fn keyword)
-              name (if (and (string? event) (not= event ""))
-                     event (get obj :type))]
-          (emit {:name name :data obj}))))))
-
-(defn read-sse [in emit]
-  (let [rdr (java.io.BufferedReader.
-              (if (string? in)
-                (java.io.StringReader. in)
-                (java.io.InputStreamReader. in "UTF-8")))]
-    (loop [event nil data []]
-      (let [line (.readLine rdr)]
-        (if (nil? line)
-          (do (when (seq data) (dispatch-sse event data emit)) nil)
-          (let [line (str/trim line)]
-            (cond
-              (= line "")
-              (do (when (seq data) (dispatch-sse event data emit))
-                  (recur nil []))
-              (str/starts-with? line "event:")
-              (recur (str/trim (subs line 6)) data)
-              (str/starts-with? line "data:")
-              (recur event (conj data (str/trim (subs line 5))))
-              :else (recur event data))))))))
-
-;; ---------------------------------------------------------------------------
 ;; Transport selection: WebSocket continuation vs SSE fallback
 ;; ---------------------------------------------------------------------------
 
@@ -226,11 +161,7 @@
         (throw e)))))
 
 (defn sse-source [runtime request session-id]
-  (let [in (upstream-sse runtime request session-id)]
-    {:read (fn [emit] (read-sse in emit))
-     :finalize (fn [_] (try (when (instance? java.io.Closeable in)
-                              (.close ^java.io.Closeable in))
-                            (catch Throwable _ nil)))}))
+  (transport-sse/source runtime request session-id))
 
 (defn open-event-source [runtime request session-id for-chat]
   (let [pool (:pool runtime)
