@@ -88,7 +88,7 @@ ss -ltn | grep 7888 && cat .nrepl-port
 - Kill **by PID**, never `pkill -f 'jolt nrepl-server'` (self-matches the shell
   and silently kills your tool call — see `JOLT-GOTCHAS.md` §2).
 - Live-reload a namespace into the running proxy:
-  `brepl eval -e '(require (quote codex.X) :reload)'`
+  `brepl '(require (quote codex.X) :reload)'`
 - Evaluate a file: `brepl -f path/to/file.clj` (searches `.nrepl-port` upward
   from the file's dir — so run from this project dir).
 - `brepl -f` **discards buffered `println` stdout on error** but still prints
@@ -133,14 +133,14 @@ is passed through unchanged and the proxy's delta logic defers to it.
 `deps.edn` has `:paths ["src"]`. Namespaces live under `src/codex/*.clj` as
 `codex.auth`, `codex.ws`, `codex.continuation`, `codex.translate`,
 `codex.proxy`, `codex.core`. After editing a file, run
-`brepl balance <file>` (per `AGENTS.md`) then `brepl eval -e '(require (quote codex.X) :reload)'`.
+`brepl balance <file>` (per `AGENTS.md`) then `brepl '(require (quote codex.X) :reload)'`.
 
 ---
 
 ## Phase 0 — Foundation (DONE ✓)
 
 - [x] `deps.edn` (ring-chez-adapter + http-client + data.json + time)
-- [x] nREPL + `brepl eval` workflow verified (port 7888, this dir)
+- [x] nREPL + `brepl '<form>'` workflow verified (port 7888, this dir)
 - [x] Outbound TLS + WebSocket handshake verified end-to-end (`ws_handshake.clj` → 101)
 - [x] Diagnosed real blocker (R1: tagged-table `ref-get`), removed misdiagnosed vendor
 - [x] Filed `JOLT-ISSUES.md`, `CLOJURE-CONVERGENCE.md`, `JOLT-GOTCHAS.md`
@@ -241,7 +241,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 **Acceptance:**
 ```
 brepl -f src/codex/auth.clj
-brepl eval -e '(in-ns (quote codex.auth)) (def s (start! default-auth-path)) (println "acct:" (:account_id @s)) (println "token-len:" (count (:access_token @s))) (println "forced refresh:" (count (first (token s :force true))))'
+brepl '(in-ns (quote codex.auth)) (def s (start! default-auth-path)) (println "acct:" (:account_id @s)) (println "token-len:" (count (:access_token @s))) (println "forced refresh:" (count (first (token s :force true))))'
 ```
 Must print a non-empty `account_id`, a token length ~1700+, and a refreshed
 token length ~1700+. `account_id` must match the `account_id` in `auth.json`
@@ -363,7 +363,7 @@ released to the pool). Mirror Go `readWebSocket`.
 **Acceptance:**
 ```
 brepl -f src/codex/ws.clj
-brepl eval -e '(in-ns (quote codex.ws)) (require (quote [clojure.data.json :as json])) (def auth (json/read-str (slurp "/home/user/.config/chatgpt-openai-api-adapter/auth.json") :key-fn keyword)) (def conn (dial (:access_token auth) (:account_id auth) "wstest02")) (println "dial ok:" (some? (:stream conn))) (println "accept ok:" (:accept-ok conn)) (write-text conn (json/write-str {:type "response.create" :model "gpt-5.4" :input [{:role "user" :content "say hi in one word"}] :stream true :store false})) (def events (atom [])) (read-until-terminal conn (fn [e] (swap! events conj (:type e)))) (println "event types:" (take 8 @events)) (write-close conn)'
+brepl '(in-ns (quote codex.ws)) (require (quote [clojure.data.json :as json])) (def auth (json/read-str (slurp "/home/user/.config/chatgpt-openai-api-adapter/auth.json") :key-fn keyword)) (def conn (dial (:access_token auth) (:account_id auth) "wstest02")) (println "dial ok:" (some? (:stream conn))) (println "accept ok:" (:accept-ok conn)) (write-text conn (json/write-str {:type "response.create" :model "gpt-5.4" :input [{:role "user" :content "say hi in one word"}] :stream true :store false})) (def events (atom [])) (read-until-terminal conn (fn [e] (swap! events conj (:type e)))) (println "event types:" (take 8 @events)) (write-close conn)'
 ```
 Must print `dial ok: true`, `accept ok: true`, and an event-types list
 containing `"response.completed"` (or `response.done`). The model name must be
@@ -513,7 +513,7 @@ normalize `/v1/responses` bodies for the upstream. Mirror Go `translate.go`
 **Acceptance:**
 ```
 brepl -f src/codex/translate.clj
-brepl eval -e '(in-ns (quote codex.translate)) (def [req model stream] (chat-to-responses (json/write-str {:model "gpt-5.4" :messages [{:role "system" :content "be brief"} {:role "user" :content "hi"}] :stream true}))) (println "model:" model "stream:" stream "store:" (:store req) "instructions:" (:instructions req) "input:" (:input req))'
+brepl '(in-ns (quote codex.translate)) (def [req model stream] (chat-to-responses (json/write-str {:model "gpt-5.4" :messages [{:role "system" :content "be brief"} {:role "user" :content "hi"}] :stream true}))) (println "model:" model "stream:" stream "store:" (:store req) "instructions:" (:instructions req) "input:" (:input req))'
 ```
 Must print `model: gpt-5.4 stream: true store: false instructions: be brief
 input: [{:role user :content "hi"}]`.
@@ -673,12 +673,12 @@ curl must stream `data: {...}` chunks ending in `data: [DONE]`.
 **Acceptance:**
 ```
 brepl -f src/codex/core.clj
-brepl eval -e '(require (quote codex.core)) (codex.core/start! :port 8080 :auth-path codex.auth/default-auth-path)'
+brepl '(require (quote codex.core)) (codex.core/start! :port 8080 :auth-path codex.auth/default-auth-path)'
 curl -sN http://127.0.0.1:8080/health
-brepl eval -e '(codex.core/stop!)'
+brepl '(codex.core/stop!)'
 ```
 `/health` returns `{"status":"ok"}`. Live reload: edit `codex/proxy.clj`, run
-`brepl eval -e '(require (quote codex.proxy) :reload)'`, hit `/health` again —
+`brepl '(require (quote codex.proxy) :reload)'`, hit `/health` again —
 new code is live without restarting the server.
 
 **Common mistakes:**
