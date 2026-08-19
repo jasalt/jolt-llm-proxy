@@ -1,28 +1,125 @@
 (ns codex.translate
   "Translate between `/v1/chat/completions` and `/v1/responses` bodies.
   Mirrors Go `translate.go` (`chatToResponses`, `prepareResponses`, and the
-  flattening helpers). All produced request bodies set `:store false` (R6)."
+  flattening helpers). All produced request bodies set `:store false` (R6).
+
+  Both entry points parse client JSON with **string keys** and validate it
+  before any keyword conversion, so arbitrary client-controlled key names are
+  never interned as keywords. `chat-to-responses` extracts recognized fields
+  explicitly and drops unknown ones. `prepare-responses` keywordizes only a
+  known top-level key set and passes unknown keys through upstream with their
+  original string keys (deliberate compatibility policy); input items are
+  keywordized recursively (bounded by item count, body size, and a nesting
+  cap) so `codex.continuation` keeps matching prefixes."
   (:require [clojure.data.json :as json]))
+
+(def max-messages 1000)
+(def max-tools 128)
+(def max-input-items 1000)
+(def max-nesting-depth 32)
+
+;; ---------------------------------------------------------------------------
+;; Parsing + validation helpers
+;; ---------------------------------------------------------------------------
 
 (defn- to-str
   "Coerce a request body (string or byte array) to a string for JSON parsing."
   [raw]
   (if (string? raw) raw (String. raw "UTF-8")))
 
+(defn- check
+  ([ok message]
+   (when-not ok (throw (ex-info message {}))))
+  ([ok message data]
+   (when-not ok (throw (ex-info message data)))))
+
+(defn- parse-object
+  "Parse a JSON body with string keys, rejecting non-object bodies."
+  [raw message]
+  (let [parsed (json/read-str (to-str raw))]
+    (check (map? parsed) message)
+    parsed))
+
+(defn- require-string-field
+  "Return a non-empty string field or throw."
+  [m k message]
+  (let [v (get m k)]
+    (check (and (string? v) (not= v "")) message)
+    v))
+
+(defn- valid-boolean? [v]
+  (or (nil? v) (true? v) (false? v)))
+
+(defn- valid-content?
+  "Content is a string or a vector of content-part objects."
+  [v]
+  (or (nil? v)
+      (string? v)
+      (and (vector? v) (every? map? v))))
+
+(defn- valid-tools?
+  "Tools is a bounded vector of objects."
+  [v]
+  (and (vector? v)
+       (<= (count v) max-tools)
+       (every? map? v)))
+
+(defn- validate-chat-shape
+  "Validate the /v1/chat/completions fields the translation consumes."
+  [chat]
+  (check (valid-boolean? (get chat "stream")) "stream must be a boolean")
+  (let [tools (get chat "tools")]
+    (when (some? tools) (check (valid-tools? tools) "tools must be an array of objects")))
+  (let [functions (get chat "functions")]
+    (when (some? functions)
+      (check (valid-tools? functions) "functions must be an array of objects")))
+  (let [tool-choice (get chat "tool_choice")]
+    (when (some? tool-choice)
+      (check (or (string? tool-choice) (map? tool-choice))
+             "tool_choice must be a string or object")))
+  (let [temperature (get chat "temperature")]
+    (when (some? temperature)
+      (check (number? temperature) "temperature must be a number")))
+  (let [parallel (get chat "parallel_tool_calls")]
+    (when (some? parallel)
+      (check (valid-boolean? parallel) "parallel_tool_calls must be a boolean")))
+  (let [n (get chat "n")]
+    (when (and (number? n) (not= n 1))
+      (throw (ex-info "only n=1 is supported" {})))))
+
+(defn- validate-message
+  "Validate one chat message map (string keys)."
+  [value]
+  (check (map? value) "each message must be an object")
+  (let [role (get value "role")]
+    (check (string? role) "message role must be a string")
+    (check (valid-content? (get value "content"))
+           "message content must be a string or array of objects")
+    (let [calls (get value "tool_calls")]
+      (when (some? calls)
+        (check (and (vector? calls) (every? map? calls))
+               "tool_calls must be an array of objects")
+        (doseq [call calls]
+          (check (map? (get call "function"))
+                 "each tool_call must have a function object"))))
+    (let [call-id (get value "tool_call_id")]
+      (when (some? call-id)
+        (check (string? call-id) "tool_call_id must be a string")))))
+
 ;; ---------------------------------------------------------------------------
-;; Content extraction / construction
+;; Content extraction / construction (string-keyed input)
 ;; ---------------------------------------------------------------------------
 
 (defn content-text
-  "Join the text of `:text` content parts with \"\\n\"."
+  "Join the text of `\"text\"` content parts with \"\\n\"."
   [value]
   (cond
     (string? value) value
     (vector? value)
     (let [sb (StringBuilder.)]
       (doseq [part value]
-        (when (and (map? part) (= (:type part) "text"))
-          (let [t (:text part)]
+        (when (and (map? part) (= (get part "type") "text"))
+          (let [t (get part "text")]
             (when (and t (not= t ""))
               (when (> (.length sb) 0) (.append sb "\n"))
               (.append sb t)))))
@@ -38,54 +135,55 @@
     (vec (mapcat (fn [part]
                    (when (map? part)
                      (cond
-                       (= (:type part) "text")
-                       [{:type "input_text" :text (:text part)}]
-                       (= (:type part) "image_url")
-                       (let [image (or (:image_url part) (:url part))
-                             image (if (map? image) (:url image) image)]
+                       (= (get part "type") "text")
+                       [{:type "input_text" :text (get part "text")}]
+                       (= (get part "type") "image_url")
+                       (let [image (or (get part "image_url") (get part "url"))
+                             image (if (map? image) (get image "url") image)]
                          [{:type "input_image" :image_url image}])
                        :else [])))
                  value))
     :else nil))
 
 ;; ---------------------------------------------------------------------------
-;; Flattening helpers
+;; Flattening helpers (string-keyed input)
 ;; ---------------------------------------------------------------------------
 
 (defn flatten-tools
   "Drop the `function` wrapper from function tools, keeping known sub-keys."
   [tools]
   (vec (map (fn [tool]
-              (if (not= (:type tool) "function")
+              (if (not= (get tool "type") "function")
                 tool
-                (let [fnm (:function tool)]
-                  (reduce (fn [flat k]
-                            (if (contains? fnm k)
-                              (assoc flat k (get fnm k))
+                (let [fnm (get tool "function")]
+                  (reduce (fn [flat [src dst]]
+                            (if (contains? fnm src)
+                              (assoc flat dst (get fnm src))
                               flat))
                           {:type "function"}
-                          [:name :description :parameters :strict]))))
+                          [["name" :name] ["description" :description]
+                           ["parameters" :parameters] ["strict" :strict]]))))
             tools)))
 
 (defn flatten-tool-choice
   "Flatten a function tool_choice to `{:type \"function\" :name ...}`."
   [value]
-  (if (and (map? value) (= (:type value) "function"))
-    (let [fnm (:function value)]
-      {:type "function" :name (:name fnm)})
+  (if (and (map? value) (= (get value "type") "function"))
+    (let [fnm (get value "function")]
+      {:type "function" :name (get fnm "name")})
     value))
 
 (defn flatten-response-format
   "Keep only name/schema/strict from a json_schema response_format."
   [format]
-  (if (not= (:type format) "json_schema")
+  (if (not= (get format "type") "json_schema")
     format
-    (reduce (fn [r k]
-              (if (contains? format k)
-                (assoc r k (get format k))
+    (reduce (fn [r [src dst]]
+              (if (contains? format src)
+                (assoc r dst (get format src))
                 r))
             {:type "json_schema"}
-            [:name :schema :strict])))
+            [["name" :name] ["schema" :schema] ["strict" :strict]])))
 
 ;; ---------------------------------------------------------------------------
 ;; chat/completions -> responses
@@ -93,128 +191,168 @@
 
 (defn chat-to-responses
   "Parse a `/v1/chat/completions` body and return `[request model stream]`.
-  Throws on invalid input."
+  Throws on invalid input. Unknown top-level fields are dropped: the upstream
+  request is built only from recognized fields."
   [raw]
-  (let [chat (json/read-str (to-str raw) :key-fn keyword)
-        model (:model chat)
-        messages (:messages chat)]
-    (when-not (map? chat)
-      (throw (ex-info "request body must be a JSON object" {})))
-    (when-not (and (string? model) (not= model ""))
-      (throw (ex-info "model must be a non-empty string" {})))
-    (when-not (and (vector? messages) (not (empty? messages)))
-      (throw (ex-info "messages must be a non-empty array" {})))
-    (when (> (count messages) 1000)
-      (throw (ex-info "too many messages" {:limit 1000})))
-    (let [stream (:stream chat)
+  (let [chat (parse-object raw "request body must be a JSON object")
+        model (require-string-field chat "model" "model must be a non-empty string")
+        messages (get chat "messages")]
+    (check (and (vector? messages) (not (empty? messages)))
+           "messages must be a non-empty array")
+    (check (<= (count messages) max-messages)
+           "too many messages" {:limit max-messages})
+    (validate-chat-shape chat)
+    (doseq [value messages] (validate-message value))
+    (let [stream (get chat "stream")
           instructions (atom "")
           input (atom [])]
       (doseq [value messages]
-        (when-not (map? value)
-          (throw (ex-info "each message must be an object" {})))
-        (let [role (:role value)]
-          (when-not (string? role)
-            (throw (ex-info "message role must be a string" {})))
+        (let [role (get value "role")]
           (cond
               (or (= role "system") (= role "developer"))
-              (let [text (content-text (:content value))]
+              (let [text (content-text (get value "content"))]
                 (when (not= text "")
                   (when (not= @instructions "")
                     (swap! instructions #(str % "\n\n")))
                   (swap! instructions #(str % text))))
               (= role "assistant")
-              (let [text (content-text (:content value))
-                    calls (:tool_calls value)
-                    legacy (:function_call value)]
+              (let [text (content-text (get value "content"))
+                    calls (get value "tool_calls")
+                    legacy (get value "function_call")]
                 (when (or (not= text "")
                           (and (empty? calls) (nil? legacy)))
                   (swap! input conj {:role "assistant" :content text}))
                 (doseq [call calls]
-                  (let [fnm (:function call)]
+                  (let [fnm (get call "function")]
                     (swap! input conj {:type "function_call"
-                                       :call_id (:id call)
-                                       :name (:name fnm)
-                                       :arguments (:arguments fnm)})))
+                                       :call_id (get call "id")
+                                       :name (get fnm "name")
+                                       :arguments (get fnm "arguments")})))
                 (when (map? legacy)
                   (swap! input conj {:type "function_call"
-                                     :call_id (str "fc_" (:name legacy))
-                                     :name (:name legacy)
-                                     :arguments (:arguments legacy)})))
+                                     :call_id (str "fc_" (get legacy "name"))
+                                     :name (get legacy "name")
+                                     :arguments (get legacy "arguments")})))
               (= role "tool")
               (swap! input conj {:type "function_call_output"
-                                 :call_id (:tool_call_id value)
-                                 :output (content-text (:content value))})
+                                 :call_id (get value "tool_call_id")
+                                 :output (content-text (get value "content"))})
               (= role "function")
               (swap! input conj {:type "function_call_output"
-                                 :call_id (str "fc_" (:name value))
-                                 :output (content-text (:content value))})
+                                 :call_id (str "fc_" (get value "name"))
+                                 :output (content-text (get value "content"))})
               (= role "user")
               (swap! input conj {:role "user"
-                                 :content (response-content (:content value))})
+                                 :content (response-content (get value "content"))})
             :else
             (throw (ex-info (str "unsupported message role: " role) {})))))
       (when (= @instructions "")
         (reset! instructions "You are a helpful assistant."))
       (when (empty? @input)
         (reset! input [{:role "user" :content ""}]))
-      (when (and (number? (:n chat)) (not= (:n chat) 1))
-        (throw (ex-info "only n=1 is supported" {})))
       (let [request (merge
                      {:model model
                       :instructions @instructions
                       :input @input
                       :stream true
                       :store false}
-                     (when (and (string? (:reasoning_effort chat))
-                                (not= (:reasoning_effort chat) ""))
-                       {:reasoning {:effort (:reasoning_effort chat)
+                     (when (and (string? (get chat "reasoning_effort"))
+                                (not= (get chat "reasoning_effort") ""))
+                       {:reasoning {:effort (get chat "reasoning_effort")
                                     :summary "auto"}})
-                     (when (contains? chat :service_tier)
-                       {:service_tier (:service_tier chat)})
-                     (when (contains? chat :parallel_tool_calls)
-                       {:parallel_tool_calls (:parallel_tool_calls chat)})
-                     (when (contains? chat :temperature)
-                       {:temperature (:temperature chat)})
-                     (when (contains? chat :tools)
-                       {:tools (flatten-tools (:tools chat))})
-                     (when (contains? chat :functions)
+                     (when (contains? chat "service_tier")
+                       {:service_tier (get chat "service_tier")})
+                     (when (contains? chat "parallel_tool_calls")
+                       {:parallel_tool_calls (get chat "parallel_tool_calls")})
+                     (when (contains? chat "temperature")
+                       {:temperature (get chat "temperature")})
+                     (when (contains? chat "tools")
+                       {:tools (flatten-tools (get chat "tools"))})
+                     (when (contains? chat "functions")
                        {:tools (flatten-tools
                                 (vec (map (fn [f] {:type "function" :function f})
-                                          (:functions chat))))})
-                     (when (contains? chat :tool_choice)
-                       {:tool_choice (flatten-tool-choice (:tool_choice chat))})
-                     (when (map? (:response_format chat))
+                                          (get chat "functions"))))})
+                     (when (contains? chat "tool_choice")
+                       {:tool_choice (flatten-tool-choice (get chat "tool_choice"))})
+                     (when (map? (get chat "response_format"))
                        {:text {:format (flatten-response-format
-                                        (:response_format chat))}}))]
+                                        (get chat "response_format"))}}))]
         [request model stream]))))
 
 ;; ---------------------------------------------------------------------------
 ;; responses -> normalized responses
 ;; ---------------------------------------------------------------------------
 
+(def responses-request-keys
+  "Top-level `/v1/responses` keys the proxy recognizes and keywordizes.
+  Unknown top-level keys pass through upstream unchanged (string keys) under
+  the documented compatibility policy."
+  ["model" "input" "stream" "store" "instructions" "previous_response_id"
+   "max_output_tokens" "max_tokens" "service_tier" "temperature" "top_p"
+   "tools" "tool_choice" "parallel_tool_calls" "reasoning" "text"
+   "prompt_cache_key" "include" "metadata" "truncation" "prompt" "seed"])
+
+(defn- keywordize-known-keys
+  "Convert recognized top-level string keys to keywords; leave unknown keys
+  as strings so arbitrary client-controlled names are never interned."
+  [m]
+  (reduce (fn [m k]
+            (if (contains? m k)
+              (-> m (assoc (keyword k) (get m k)) (dissoc k))
+              m))
+          m
+          responses-request-keys))
+
+(defn keywordize-nested
+  "Recursively convert string-keyed maps/vectors to keyword keys, up to
+  `max-nesting-depth`. Input items are bounded (count + adapter body cap), so
+  this keywordizes a bounded structure; deeper arbitrary keys outside `input`
+  are never converted."
+  [v]
+  (letfn [(walk [v depth]
+            (check (<= depth max-nesting-depth) "request nesting too deep"
+                   {:limit max-nesting-depth})
+            (cond
+              (map? v)
+              (reduce (fn [m entry]
+                        (let [k (key entry)]
+                          (assoc m (keyword k) (walk (val entry) (inc depth)))))
+                      {} v)
+              (vector? v)
+              (mapv #(walk % (inc depth)) v)
+              :else v))]
+    (walk v 0)))
+
 (defn prepare-responses
   "Parse a `/v1/responses` body and return `[request model stream]`. Forces
   `:stream true`, `:store false`, a default `:instructions`, and drops
   `:max_output_tokens`/`:max_tokens`. `:previous_response_id` is passed through
-  unchanged (R6)."
+  unchanged (R6). Unknown top-level keys pass through upstream with their
+  original string keys."
   [raw]
-  (let [request (json/read-str (to-str raw) :key-fn keyword)
-        model (:model request)]
-    (when-not (map? request)
-      (throw (ex-info "request body must be a JSON object" {})))
-    (when-not (and (string? model) (not= model ""))
-      (throw (ex-info "model must be a non-empty string" {})))
-    (when (not (contains? request :input))
-      (throw (ex-info "input is required" {})))
-    (when-not (or (string? (:input request)) (vector? (:input request)))
-      (throw (ex-info "input must be a string or array" {})))
-    (when (and (vector? (:input request)) (> (count (:input request)) 1000))
-      (throw (ex-info "too many input items" {:limit 1000})))
-    (let [request (if (string? (:input request))
-                    (assoc request :input [{:role "user"
-                                            :content (:input request)}])
+  (let [request (parse-object raw "request body must be a JSON object")
+        model (require-string-field request "model"
+                                    "model must be a non-empty string")
+        input (get request "input")]
+    (check (contains? request "input") "input is required")
+    (check (or (string? input) (vector? input)) "input must be a string or array")
+    (when (vector? input)
+      (check (<= (count input) max-input-items)
+             "too many input items" {:limit max-input-items})
+      (check (every? map? input) "each input item must be an object"))
+    (check (valid-boolean? (get request "stream")) "stream must be a boolean")
+    (let [tools (get request "tools")]
+      (when (some? tools)
+        (check (valid-tools? tools) "tools must be an array of objects")))
+    (let [request (keywordize-known-keys request)
+          request (if (vector? input)
+                    (assoc request :input (keywordize-nested input))
                     request)
-          stream (:stream request)
+          stream (get request :stream)
+          request (if (string? (get request :input))
+                    (assoc request :input [{:role "user"
+                                            :content (get request :input)}])
+                    request)
           request (assoc request :stream true :store false)
           request (if (contains? request :instructions)
                     request
