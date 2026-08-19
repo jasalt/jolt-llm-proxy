@@ -49,10 +49,22 @@ Wrap with a small helper if ergonomics matter:
 (defn tput! [t k v] (jolt.host/ref-put! t k v))
 ```
 
-**Caveat for Ring handlers.** `ring-chez.adapter` delivers request maps as host
-tagged-tables too. A handler written `(:headers req)` returns `nil`; use
-`(jolt.host/ref-get req :headers)`. (Confirm the exact shape per adapter
-version before relying on this — see `JOLT-ISSUES.md`.)
+**Caveat for Ring handlers.** `ring-chez.adapter` delivers request maps as
+**plain Clojure PMaps** (built with `{}`/`assoc` in `http/request->ring`), so
+`(:headers req)` and `(get-in req [:headers "upgrade"])` work normally there.
+`jolt.host/ref-get` is the **wrong** accessor on a PMap (it returns `nil`).
+The `ref-get` rule is for the **outbound `jolt.http.tls` stream** and other
+`jolt.host/tagged-table` objects, not for Ring maps. Don't mix the two:
+
+```clojure
+;; inbound ring request  — PMap, normal Clojure
+(:headers req)            ;; => {"authorization" "Bearer …", …}
+(get-in req [:headers "x-session-id"])
+
+;; outbound tls stream    — tagged-table, host accessors
+(jolt.host/ref-get st :write)  ;; => closure
+(:write st)                    ;; => nil  (WRONG)
+```
 
 ---
 
@@ -131,3 +143,27 @@ shapes by eye impossible without `(jolt.host/ref-get tt k)` probes.
 ```clojure
 (defn dump-tt [t] (into {} (map (fn [k] [k (jolt.host/ref-get t k)])) [:headers :body :write :read :close :sock]))
 ```
+
+---
+
+## 6. `java.util.Base64` shim lacks the URL variants
+
+The Jolt `java.util.Base64` shim implements `getEncoder`/`getDecoder` (standard
+base64) but **not** `getUrlEncoder`/`getUrlDecoder`. Calling
+`java.util.Base64/getUrlDecoder` throws
+`No matching field or method: java.util.Base64/getUrlDecoder`.
+
+This bites JWT decoding (JWT payloads are base64url). Workaround: translate
+base64url to standard base64 before decoding:
+
+```clojure
+(defn b64url->b64std [s]
+  (let [pad (mod (- 4 (mod (count s) 4)) 4)]
+    (-> (str s (apply str (repeat pad "=")))
+        (.replace "-" "+") (.replace "_" "/"))))
+(.decode (java.util.Base64/getDecoder) (.getBytes (b64url->b64std part) "UTF-8"))
+```
+
+Verified against a live OpenAI access token: the decoded payload's
+`:https://api.openai.com/auth` → `:chatgpt_account_id` matches `auth.json`.
+See `JOLT-ISSUES.md` JI-4.

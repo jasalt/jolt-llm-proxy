@@ -43,9 +43,12 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ codex.prox
   (assistant text matched on role only).
 - **`codex.translate`** — `/v1/chat/completions` ↔ `/v1/responses` translation.
 - **`codex.proxy`** — ring handler, routes, `prompt_cache_key`, SSE/WS event
-  collectors. **Request maps are `jolt.host/tagged-table`s**: read fields with
-  `jolt.host/ref-get`, not `(:headers req)` — see
-  [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §1.
+  collectors. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
+  `request->ring` builds them with `{}`/`assoc`): use `(:headers req)`,
+  `get-in`, `assoc` normally — do **not** use `jolt.host/ref-get` there (it
+  returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the
+  opposite: a `jolt.host/tagged-table`, so read `:write`/`:read`/`:close` with
+  `jolt.host/ref-get`, not `(:write st)`. See [`JOLT-GOTCHAS.md`](./JOLT-GOTCHAS.md) §1.
 - **`codex.core`** — `start!`/`stop!`, persistent state (token store, session
   pool). `run-server` called with `#'codex.proxy/handler` so live reload via
   `brepl eval -e '(require (quote codex.proxy) :reload)'` picks up redefs

@@ -1,6 +1,6 @@
 Use `brepl balance <file>` after write/edit on `.clj` files.
 
-Use REPL driven development to work on a live process via `brepl eval` writing idiomatic Clojure patterns on Jolt (non-JVM) platform.
+Use REPL driven development to work on a live process via `brepl '<form>'` writing idiomatic Clojure patterns on Jolt (non-JVM) platform.
 
 Main documentation: https://github.com/jolt-lang/jolt
 

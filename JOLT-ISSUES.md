@@ -108,3 +108,34 @@ Kept here to prevent re-litigating the same wrong theory. The vendored
 has been removed; upstream `jolt.http.tls` is used unmodified and a full
 `wss://chatgpt.com/backend-api/codex/responses` WebSocket handshake
 (`101 Switching Protocols` + valid `sec-websocket-accept`) completes with it.
+
+---
+
+## JI-4: `java.util.Base64` shim missing `getUrlEncoder` / `getUrlDecoder`
+
+**Component:** Jolt `host/chez/java/` `java.util.Base64` shim (Jolt v0.7.13).
+
+**Repro.**
+
+```
+$ jolt -e '(java.util.Base64/getUrlDecoder)'
+No matching field or method: java.util.Base64/getUrlDecoder
+```
+
+`getEncoder` and `getDecoder` (standard base64) are present and work; only the
+URL-safe variants (`getUrlEncoder`, `getUrlDecoder`) are unimplemented. Per the
+llms.txt note "the `java.*` shims are convincing but shallow", this is an
+expected shim gap, but it is not documented anywhere a downstream user would
+find it, and it breaks any code that copies the common JVM idiom
+`Base64/getUrlDecoder` for JWT work.
+
+**Expected.** Either implement `getUrlEncoder`/`getUrlDecoder` in the shim, or
+document the Base64 shim's exact surface (and the base64url→base64std
+workaround) in the Differences-from-Clojure section.
+
+**Impact.** `codex.auth` JWT decoding. Workaround in `JOLT-GOTCHAS.md` §6.
+
+**Confirmed by `bb`?** Not needed — `bb` delegates to the real JVM
+`java.util.Base64/getUrlDecoder`, which works; the divergence is Jolt-only.
+(`bb -e '(println (.decodeToString (java.util.Base64/getUrlDecoder) "aGVsbG8"))')`
+prints `hello` under bb.)
