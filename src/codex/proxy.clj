@@ -29,6 +29,7 @@
    "gpt-5.6-luna" "gpt-5.6-sol" "gpt-5.6-terra"])
 
 (def prompt-cache-key-max-length 64)
+(def session-id-pattern #"^[A-Za-z0-9._:-]+$")
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -58,14 +59,23 @@
         (recur (inc i)
                (.append s (format "%02x" (bit-and (aget b i) 0xFF))))))))
 
-(defn- clamp-prompt-cache-key [key]
-  (if (<= (count key) prompt-cache-key-max-length) key (subs key 0 prompt-cache-key-max-length)))
+(defn normalize-session-id
+  "Validate and clamp a client session/cache identifier before it becomes a
+  pool key or upstream header. Returns nil for blank input."
+  [value]
+  (let [key (str/trim (or value ""))]
+    (when (not= key "")
+      (when-not (re-matches session-id-pattern key)
+        (throw (ex-info "session id contains unsupported characters"
+                        {:type :invalid-session-id})))
+      (if (<= (count key) prompt-cache-key-max-length)
+        key
+        (subs key 0 prompt-cache-key-max-length)))))
 
 (defn resolve-session-id [req]
   (let [default (:session-id @system)]
     (or (some (fn [h]
-                (let [k (str/trim (get-in req [:headers h] ""))]
-                  (when (not= k "") k)))
+                (normalize-session-id (get-in req [:headers h] "")))
               ["x-session-id" "x-prompt-cache-key"])
         default)))
 
@@ -567,10 +577,15 @@
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
       (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
-      (let [[request model stream] parsed
-            session-id (resolve-session-id req)
-            request (apply-prompt-cache-key request session-id)
-            src (open-event-source request session-id true)]
+      (let [session-result (try (resolve-session-id req)
+                                (catch Throwable e {:error e}))]
+        (if (map? session-result)
+          (write-openai-error 400 "invalid_session_id"
+                              (.getMessage ^Throwable (:error session-result)))
+          (let [[request model stream] parsed
+                session-id session-result
+                request (apply-prompt-cache-key request session-id)
+                src (open-event-source request session-id true)]
         (if stream
           (let [ch (async/chan)]
             (async/thread
@@ -596,7 +611,7 @@
             ((:finalize src) meta)
             {:status 200
              :headers {"Content-Type" "application/json"}
-             :body (json/write-str response)}))))))
+             :body (json/write-str response)}))))))))
 
 (defn responses [req]
   (let [raw (slurp-body req)
@@ -604,10 +619,15 @@
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
       (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
-      (let [[request _model stream] parsed
-            session-id (resolve-session-id req)
-            request (apply-prompt-cache-key request session-id)
-            src (open-event-source request session-id false)]
+      (let [session-result (try (resolve-session-id req)
+                                (catch Throwable e {:error e}))]
+        (if (map? session-result)
+          (write-openai-error 400 "invalid_session_id"
+                              (.getMessage ^Throwable (:error session-result)))
+          (let [[request _model stream] parsed
+                session-id session-result
+                request (apply-prompt-cache-key request session-id)
+                src (open-event-source request session-id false)]
         (if stream
           (let [ch (async/chan)]
             (async/thread
@@ -628,7 +648,7 @@
             ((:finalize src) meta)
             {:status 200
              :headers {"Content-Type" "application/json"}
-             :body (json/write-str response)}))))))
+             :body (json/write-str response)}))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Top-level handler (var, so redefs are live via run-server #'handler)
