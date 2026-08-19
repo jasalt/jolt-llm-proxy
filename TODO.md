@@ -143,8 +143,8 @@ is passed through unchanged and the proxy's delta logic defers to it.
 - [x] Phase 1 — `codex.auth` (done)
 - [x] Phase 2 — `codex.ws` (done; dial, masked frames, defrag, pool reuse verified)
 - [x] Phase 3 — `codex.continuation` (done; delta + lenient prefix match verified)
-- [ ] Phase 4 — `codex.translate`
-- [ ] Phase 5 — `codex.proxy`
+- [x] Phase 4 — `codex.translate` (done; chat↔responses + prepare verified)
+- [ ] Phase 5 — `codex.proxy` (in progress)
 - [ ] Phase 6 — `codex.core`
 - [ ] Phase 7 — End-to-end verification
 - [ ] Phase 8 — Docs, issues, polish
@@ -487,7 +487,7 @@ Must print `PASS` for both cases.
 
 ---
 
-## Phase 4 — `codex.translate` (chat ↔ responses) — IN PROGRESS
+## Phase 4 — `codex.translate` (chat ↔ responses) — DONE ✓
 
 **Goal:** convert `/v1/chat/completions` bodies to `/v1/responses` bodies, and
 normalize `/v1/responses` bodies for the upstream. Mirror Go `translate.go`
@@ -540,7 +540,7 @@ input: [{:role user :content "hi"}]`.
 
 ---
 
-## Phase 5 — `codex.proxy` (ring handler + collectors)
+## Phase 5 — `codex.proxy` (ring handler + collectors) — IN PROGRESS
 
 **Goal:** the Ring handler with routes `/health`, `/v1/models`,
 `/v1/chat/completions`, `/v1/responses`; API-key guard; prompt-cache key
