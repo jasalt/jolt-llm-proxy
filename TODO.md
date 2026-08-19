@@ -137,6 +137,20 @@ is passed through unchanged and the proxy's delta logic defers to it.
 
 ---
 
+## Progress
+
+- [x] Phase 0 — Foundation (done)
+- [ ] Phase 1 — `codex.auth` (in progress)
+- [ ] Phase 2 — `codex.ws`
+- [ ] Phase 3 — `codex.continuation`
+- [ ] Phase 4 — `codex.translate`
+- [ ] Phase 5 — `codex.proxy`
+- [ ] Phase 6 — `codex.core`
+- [ ] Phase 7 — End-to-end verification
+- [ ] Phase 8 — Docs, issues, polish
+
+---
+
 ## Phase 0 — Foundation (DONE ✓)
 
 - [x] `deps.edn` (ring-chez-adapter + http-client + data.json + time)
@@ -149,7 +163,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 
 ---
 
-## Phase 1 — `codex.auth` (token store + refresh)
+## Phase 1 — `codex.auth` (token store + refresh) — IN PROGRESS
 
 **Goal:** load `auth.json`, refresh the OAuth access token when expired, expose
 `[token account-id]` to the rest of the proxy. Mirror Go `auth.go`
