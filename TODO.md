@@ -142,7 +142,7 @@ is passed through unchanged and the proxy's delta logic defers to it.
 - [x] Phase 0 — Foundation (done)
 - [x] Phase 1 — `codex.auth` (done)
 - [x] Phase 2 — `codex.ws` (done; dial, masked frames, defrag, pool reuse verified)
-- [ ] Phase 3 — `codex.continuation` (in progress)
+- [x] Phase 3 — `codex.continuation` (done; delta + lenient prefix match verified)
 - [ ] Phase 4 — `codex.translate`
 - [ ] Phase 5 — `codex.proxy`
 - [ ] Phase 6 — `codex.core`
@@ -395,7 +395,7 @@ one a current Codex subscription accepts (check `modelIDs` in Go `proxy.go`;
 
 ---
 
-## Phase 3 — `codex.continuation` (delta request + prefix match) — IN PROGRESS
+## Phase 3 — `codex.continuation` (delta request + prefix match) — DONE ✓
 
 **Goal:** given the current request body and the prior turn's
 `continuationState`, produce a delta body (`previous_response_id` + only the
@@ -487,7 +487,7 @@ Must print `PASS` for both cases.
 
 ---
 
-## Phase 4 — `codex.translate` (chat ↔ responses)
+## Phase 4 — `codex.translate` (chat ↔ responses) — IN PROGRESS
 
 **Goal:** convert `/v1/chat/completions` bodies to `/v1/responses` bodies, and
 normalize `/v1/responses` bodies for the upstream. Mirror Go `translate.go`
