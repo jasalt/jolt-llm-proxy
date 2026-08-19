@@ -1,0 +1,29 @@
+---
+name: test
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  jolt-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+        with:
+          persist-credentials: false
+      - name: Install Jolt
+        run: |
+          release=https://github.com/jolt-lang/jolt/releases/download/v0.7.16
+          curl -fsSL "$release/jolt-linux-x86_64" -o jolt
+          chmod +x jolt
+          sudo mv jolt /usr/local/bin/jolt
+      - name: Load production namespaces
+        run: >-
+          jolt -e '(doseq [n (quote [codex.auth codex.cli codex.continuation
+          codex.translate codex.ws codex.proxy codex.core])] (require n))'
+      - name: Run unit tests
+        run: jolt -M:test -m codex.test-runner

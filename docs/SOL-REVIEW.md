@@ -26,7 +26,7 @@ Progress is updated with each atomic implementation commit.
 | Done | P0 | Make WebSocket pool acquisition/release atomic | Added serialized pool transitions, identity-checked/idempotent release, and idempotent connection close |
 | Done | P0 | Guarantee acquired WS connections are released on every failure | `ws-source` now releases with `keep=false` if setup or the initial write fails |
 | Done | P0 | Report chat stream failures as failures | Failed streams now emit an error, never a successful stop chunk, and finalize with `:completed false` |
-| Pending | P1 | Add real automated tests and CI | Current tests mostly print output and cannot reliably fail a build |
+| Done | P1 | Add real automated tests and CI | Added 10 deterministic tests (25 assertions), a failing test runner, and a Jolt v0.7.16 CI workflow |
 | Done | P1 | Bound and normalize client session IDs and pool cardinality | IDs are allowlisted/clamped and the cache is capped at 128 sessions with idle LRU eviction |
 | Done | P1 | Harden OAuth callback handling and cleanup | Callback now validates method/path, ignores wrong-state probes without aborting login, uses static HTML, and always stops the server |
 | Pending | P1 | Consolidate runtime ownership and split `codex.proxy` | Three global state holders make lifecycle and testing fragile |
@@ -172,9 +172,17 @@ and normal completion separately.
 
 ### 5. Replace smoke scripts with a real test suite and CI gate
 
+**Status: implemented for the first deterministic baseline.** Tests now live
+under `test/codex/`, run through `codex.test-runner`, and throw on any failure.
+The initial 10 tests/25 assertions cover credential persistence/error handling,
+continuation, translation, session validation, and the API-key guard. GitHub CI
+loads every production namespace and runs the suite on Jolt v0.7.16. Transport
+frame and forced-concurrency coverage should continue to expand with future
+changes.
+
 **Locations:** `test_continuation.clj`, `TODO.md:713-746`, repository root
 
-There is no tracked `test/` suite or CI workflow. `test_continuation.clj` prints
+Previously there was no tracked `test/` suite or CI workflow. `test_continuation.clj` prints
 `PASS` only inside successful branches but never throws or exits nonzero when an
 assertion fails. The TODO says to write `test_e2e.clj`, yet that file is not
 tracked. Several complex areas have no automated coverage: translation,
