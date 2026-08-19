@@ -140,9 +140,9 @@ is passed through unchanged and the proxy's delta logic defers to it.
 ## Progress
 
 - [x] Phase 0 — Foundation (done)
-- [ ] Phase 1 — `codex.auth` (in progress)
-- [ ] Phase 2 — `codex.ws`
-- [ ] Phase 3 — `codex.continuation`
+- [x] Phase 1 — `codex.auth` (done)
+- [x] Phase 2 — `codex.ws` (done; dial, masked frames, defrag, pool reuse verified)
+- [ ] Phase 3 — `codex.continuation` (in progress)
 - [ ] Phase 4 — `codex.translate`
 - [ ] Phase 5 — `codex.proxy`
 - [ ] Phase 6 — `codex.core`
@@ -270,7 +270,7 @@ token length ~1700+. `account_id` must match the `account_id` in `auth.json`
 
 ---
 
-## Phase 2 — `codex.ws` (RFC 6455 client + per-session pool)
+## Phase 2 — `codex.ws` (RFC 6455 client + per-session pool) — DONE ✓
 
 **Goal:** a minimal WebSocket client over the `jolt.http.tls` stream: dial,
 handshake, send masked text frames, read+defragment messages, handle
@@ -395,7 +395,7 @@ one a current Codex subscription accepts (check `modelIDs` in Go `proxy.go`;
 
 ---
 
-## Phase 3 — `codex.continuation` (delta request + prefix match)
+## Phase 3 — `codex.continuation` (delta request + prefix match) — IN PROGRESS
 
 **Goal:** given the current request body and the prior turn's
 `continuationState`, produce a delta body (`previous_response_id` + only the
