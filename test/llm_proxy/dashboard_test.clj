@@ -16,9 +16,11 @@
    :session-id "raw-session-id"
    :api-key "secret-api-key"
    :port 8080
+   :nrepl-port 8002
    :started-at (System/currentTimeMillis)
    :requests (atom 0)
-   :dashboard-enabled true})
+   :dashboard-enabled true
+   :runtime-state (atom nil)})
 
 (deftest dashboard-is-optional-and-excluded-from-request-metrics
   (let [request {:request-method :get :uri "/_llm-proxy" :headers {}}
@@ -34,6 +36,21 @@
                    "'unsafe-eval'"))
     (is (not (re-find #"secret-token|secret-api-key|raw-session-id"
                       (:body response))))))
+
+(deftest dashboard-uses-live-runtime-state
+  (let [rt (runtime)
+        state (atom (assoc rt :nrepl-port nil))
+        handler (proxy/make-handler (assoc rt :runtime-state state))
+        disabled (handler {:request-method :get :uri "/_llm-proxy/events" :headers {}})
+        disabled-event (async/<!! (:body disabled))]
+    (is (.contains disabled-event "<dt>nREPL Listener</dt><dd>Disabled</dd>"))
+    (async/close! (:body disabled))
+    (swap! state assoc :nrepl-port 8002)
+    (let [enabled (handler {:request-method :get :uri "/_llm-proxy/events" :headers {}})
+          enabled-event (async/<!! (:body enabled))]
+      (is (.contains enabled-event "<dt>nREPL Listener</dt><dd>127.0.0.1:8002</dd>"))
+      (is (.contains enabled-event "127.0.0.1:8002"))
+      (async/close! (:body enabled)))))
 
 (deftest dashboard-routes-do-not-increment-request-metric
   (let [rt (runtime)
@@ -69,6 +86,9 @@
     (is (.contains event "data: selector #dashboard"))
     (is (.contains event "WebSocket pool"))
     (is (.contains event "Token expiry"))
+    (is (.contains event "nREPL Listener"))
+    (is (.contains event "127.0.0.1:8002"))
+    (is (.contains event "<dt>nREPL Listener</dt><dd>127.0.0.1:8002</dd>"))
     (is (not (.contains event "secret-token")))
     (is (not (.contains event "raw-session-id")))
     (async/close! (:body response))))

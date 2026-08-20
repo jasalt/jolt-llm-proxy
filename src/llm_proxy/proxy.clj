@@ -264,16 +264,21 @@
                  :response (fn [req]
                              (require-api-key runtime req
                                               (fn [request] (responses runtime request))))}]
+        ;; Keep dashboard responses live-reloadable. The lifecycle atom is
+        ;; dereferenced for every request, rather than capturing the startup
+        ;; runtime map in the compiled route closures.
+        runtime-state (:runtime-state runtime)
+        live-runtime #(or (when runtime-state @runtime-state) runtime)
         dashboard-routes (when (:dashboard-enabled runtime)
                            [{:path "/_llm-proxy"
                              :method :get
-                             :response (fn [req] (dashboard/route runtime req))}
+                             :response (fn [req] (dashboard/route (live-runtime) req))}
                             {:path "/_llm-proxy/datastar.js"
                              :method :get
-                             :response (fn [req] (dashboard/route runtime req))}
+                             :response (fn [req] (dashboard/route (live-runtime) req))}
                             {:path "/_llm-proxy/events"
                              :method :get
-                             :response (fn [req] (dashboard/route runtime req))}])]
+                             :response (fn [req] (dashboard/route (live-runtime) req))}])]
     (conj (into routes dashboard-routes)
           {:path :not-found
            :response (fn [_] (write-openai-error 404 "not_found" "Not found"))})))

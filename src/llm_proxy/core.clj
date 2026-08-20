@@ -68,7 +68,12 @@
           runtime {:store store :pool pool :session-id session-id
                    :api-key api-key :port port :started-at (now-ms)
                    :now-ms now-ms :random-hex random-hex
-                   :requests (atom 0) :dashboard-enabled dashboard}
+                   :requests (atom 0) :nrepl-port nrepl-port
+                   ;; Dashboard/inspection handlers dereference the lifecycle
+                   ;; atom at request time, allowing safe live configuration
+                   ;; patches without recompiling the Ring routes.
+                   :runtime-state system
+                   :dashboard-enabled dashboard}
           handler (proxy/make-handler runtime)]
       ;; ring-chez-adapter currently compares decoded character counts with
       ;; byte-based Content-Length. Install byte-correct framing before its

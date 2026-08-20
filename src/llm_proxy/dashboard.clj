@@ -29,11 +29,13 @@
     (str "<section id=\"dashboard\">"
          "<h2>Runtime</h2><dl>"
          "<dt>Listener</dt><dd>" (escape-html (get-in s [:listener :address])) "</dd>"
+         "<dt>nREPL Listener</dt><dd>" (if (:nrepl-enabled features)
+                                          (escape-html (get-in s [:nrepl :address]))
+                                          "Disabled") "</dd>"
          "<dt>Uptime</dt><dd>" (escape-html (:uptime-seconds s)) " seconds</dd>"
          "<dt>Requests served</dt><dd>" (escape-html (:requests s)) "</dd>"
          "<dt>Request limit</dt><dd>" (escape-html (get-in s [:listener :request-limit-bytes])) " bytes</dd>"
          "<dt>API-key guard</dt><dd>" (if (:api-key-auth-enabled features) "enabled" "disabled") "</dd>"
-         "<dt>nREPL</dt><dd>" (if (:nrepl-enabled features) "enabled" "disabled") "</dd>"
          "<dt>Codex authentication</dt><dd>" (if (get-in s [:codex :authenticated]) "ready" "not ready") "</dd>"
          "<dt>Token expiry</dt><dd>" (if (some? token-expiry)
                                          (str (escape-html token-expiry) " seconds remaining")

@@ -46,13 +46,20 @@
   "Return only safe scalar operational state from an application runtime."
   [runtime]
   (let [now ((or (:now-ms runtime) time/now-ms))
-        started-at (:started-at runtime)]
+        started-at (:started-at runtime)
+        nrepl-port (:nrepl-port runtime)]
     {:started-at started-at
      :uptime-seconds (elapsed-seconds now started-at)
      :listener {:address (str "127.0.0.1:" (:port runtime))
                 :request-limit-bytes 1048576}
+     :nrepl {:address (when-let [port nrepl-port]
+                        (str "127.0.0.1:" port))
+             :enabled (some? nrepl-port)}
      :features {:api-key-auth-enabled (not= "" (:api-key runtime))
-                :nrepl-enabled (some? (:stop-nrepl runtime))
+                ;; The configured port is the feature flag. The nREPL stop
+                ;; callback is an implementation detail and may be nil for a
+                ;; server that remains independently managed.
+                :nrepl-enabled (some? nrepl-port)
                 :dashboard-enabled (true? (:dashboard-enabled runtime))}
      :requests (long (or @(:requests runtime) 0))
      :codex {:authenticated (auth/authenticated? (:store runtime))
