@@ -64,22 +64,47 @@
     (is (= 1 (count @writes)))
     (is (= 0xA (bit-and (aget (first @writes) 0) 0x0F)))))
 
-(deftest malformed-control-and-fragment-errors
-  (testing "fragmented control frame"
-    (let [{:keys [conn]} (conn-from [(frame 9 (bytes 1) :fin false)])]
-      (is (thrown? Throwable (ws/read-message conn)))))
-  (testing "oversized control frame"
-    (let [{:keys [conn]} (conn-from [(frame 9 (byte-array 126))])]
-      (is (thrown? Throwable (ws/read-message conn)))))
-  (testing "continuation without initial data"
-    (let [{:keys [conn]} (conn-from [(frame 0 (bytes 1))])]
-      (is (thrown? Throwable (ws/read-message conn))))))
+(deftest control-and-fragment-errors
+  (testing "fragmented and oversized control frames"
+    (doseq [raw [(frame 9 (bytes 1) :fin false)
+                 (frame 9 (byte-array 126))]]
+      (let [{:keys [conn]} (conn-from [raw])]
+        (is (thrown? Throwable (ws/read-message conn))))))
+  (testing "invalid data-frame sequences"
+    (let [new-data-before-final
+          (byte-array (concat (seq (frame 1 (bytes 1) :fin false))
+                              (seq (frame 2 (bytes 2)))))]
+      (doseq [raw [(frame 0 (bytes 1)) new-data-before-final]]
+        (let [{:keys [conn]} (conn-from [raw])]
+          (is (thrown? Throwable (ws/read-message conn)))))))
+  (testing "reserved bits and unknown opcodes are rejected"
+    (doseq [raw [(bytes 193 0) (bytes 131 0)]]
+      (let [{:keys [conn]} (conn-from [raw])]
+        (is (thrown? Throwable (ws/read-message conn)))))))
 
 (deftest close-and-json-event-handling
   (let [{:keys [conn]} (conn-from [(frame 8 (bytes 3 232))])]
     (is (= {:type :close} (ws/read-message conn))))
   (is (= "response.done"
          (:type (ws/read-event {:data (.getBytes "{\"type\":\"response.done\"}" "UTF-8")})))))
+
+(deftest acquire-reuses-idle-connections-and-isolates-busy-owners
+  (let [pool (atom {})
+        dials (atom 0)
+        conn (fn [n] {:closed? (atom true) :id n})]
+    (with-redefs [ws/dial (fn [& _] (conn (swap! dials inc)))]
+      (let [first (ws/acquire pool "session" (constantly ["token" "account"]))
+            concurrent (ws/acquire pool "session" (constantly ["token" "account"]))]
+        (is (= 2 @dials))
+        (is (= false (:reused first)))
+        (is (= false (:reused concurrent)))
+        ((:release concurrent) false)
+        ((:release first) true)
+        (let [reused (ws/acquire pool "session" (constantly ["token" "account"]))]
+          (is (= 2 @dials))
+          (is (= true (:reused reused)))
+          ((:release reused) false)))
+    (is (empty? @pool))))
 
 (deftest pool-release-is-idempotent-and-stale-safe
   (let [pool (atom {})
@@ -94,4 +119,4 @@
       (reset! pool {"session" {:conn new :busy true}})
       (stale false)
       (is (= new (get-in @pool ["session" :conn])))
-      (is (= true (get-in @pool ["session" :busy]))))))
+      (is (= true (get-in @pool ["session" :busy])))))))
