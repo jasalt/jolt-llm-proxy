@@ -38,12 +38,17 @@ jolt -M:test -m llm-proxy.test-runner
 
 ## Usage
 
+The commands below work identically through Jolt or the standalone binary;
+substitute `./target/jolt-llm-proxy` for `jolt -m llm-proxy.core` after building.
+
 ```bash
 # Log in (browser PKCE on localhost:1455, or headless device code):
 jolt -m llm-proxy.core login
+# Or after building: ./target/jolt-llm-proxy login
 
 # Serve an OpenAI-compatible API (env: JOLT_LLM_PROXY_ADDR, JOLT_LLM_PROXY_API_KEY):
 JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve
+# Or: JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key ./target/jolt-llm-proxy serve
 
 # Development/debug only: start the proxy and a loopback nREPL for CIDER,
 # Calva, or Cursive. Defaults to 127.0.0.1:7888; set JOLT_NREPL_PORT to change it.
@@ -84,6 +89,30 @@ without one fall back to plain SSE. Credentials live at
 `JOLT_LLM_PROXY_AUTH_FILE`), shared with the Go original. The directory and
 file are maintained with modes `0700` and `0600`; startup tightens an existing
 credential file before reading it.
+
+## Build a standalone binary
+
+Jolt resolves the pinned dependencies, compiles the `llm-proxy.core` entry
+point, and embeds `resources/` into a self-contained native binary. Build on
+the target Linux/Chez platform (or use Jolt's documented `--target` /
+`--target-pack` cross-compilation options):
+
+```bash
+# Produces an optimized native executable at target/jolt-llm-proxy.
+# `--direct-link` reduces runtime var indirection for this closed-world binary.
+mkdir -p target
+jolt build -m llm-proxy.core -o target/jolt-llm-proxy --opt --direct-link
+
+# The executable contains the application and resources; Jolt is not needed
+# to run it after the build.
+./target/jolt-llm-proxy --help
+```
+
+The build command above was verified with Jolt's standalone build mode. The
+result is platform-specific; rebuild it for each target OS/architecture and
+ship it with the system OpenSSL/glibc requirements described in Prerequisites.
+Credentials are deliberately not embedded: the binary reads the normal
+`~/.config/jolt-llm-proxy/auth.json` path (or `JOLT_LLM_PROXY_AUTH_FILE`).
 
 ## Why Jolt
 
