@@ -24,8 +24,11 @@ Use pinned `org.babashka/cli` `0.12.86` as a runtime dependency for the
 - Keep `serve`, `login`, `logout`, `usage`, and `info` as explicit commands.
 - Preserve the historical no-argument behavior by dispatching no arguments as
   `serve`.
-- Define each command's option spec next to its handler. `serve` currently
-  accepts only boolean `--nrepl` and `--dashboard`.
+- Define each command's option spec next to its handler. `serve` accepts
+  `--port` / `-p` for the validated proxy HTTP port, boolean `--nrepl`, and
+  `--nrepl-port` / `-np` for the validated nREPL port (only with `--nrepl`),
+  plus `--dashboard`. The CLI HTTP port takes precedence over the port in
+  `JOLT_LLM_PROXY_ADDR`; the address host remains loopback-only.
 - Use strict option and positional-argument validation for `serve`; new options
   must be declared with coercion, validation, and help text before use.
 - Delegate command/help/error rendering to `babashka.cli`; do not reintroduce
@@ -42,7 +45,7 @@ Use pinned `org.babashka/cli` `0.12.86` as a runtime dependency for the
 
 ## Evidence
 
-`test/llm_proxy/core_test.clj` verifies strict parsing of the two current
-`serve` flags. A direct Jolt compatibility probe of `babashka.cli/dispatch`
+`test/llm_proxy/core_test.clj` verifies strict parsing, aliases, and port
+bounds for the `serve` options. A direct Jolt compatibility probe of `babashka.cli/dispatch`
 with version `0.12.86` parsed `serve --port 8081 --dashboard` into
 `{:port 8081 :dashboard true}` before adoption.

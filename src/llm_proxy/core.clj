@@ -130,8 +130,16 @@
   (or (System/getenv key) fallback))
 
 (def serve-option-spec
-  {:nrepl {:coerce :boolean
+  {:port {:alias :p
+          :coerce :long
+          :validate #(<= 1 % 65535)
+          :desc "Listen for proxy HTTP requests on this loopback TCP port (overrides JOLT_LLM_PROXY_ADDR)"}
+   :nrepl {:coerce :boolean
             :desc "Start the loopback development nREPL server"}
+   :nrepl-port {:alias :np
+                :coerce :long
+                :validate #(<= 1 % 65535)
+                :desc "Listen for nREPL connections on this port (requires --nrepl)"}
    :dashboard {:coerce :boolean
                :desc "Enable the loopback read-only operator dashboard"}})
 
@@ -152,6 +160,10 @@
   [{:keys [opts]}]
   (let [nrepl? (:nrepl opts)
         dashboard? (:dashboard opts)
+        cli-port (:port opts)
+        cli-nrepl-port (:nrepl-port opts)
+        _ (when (and cli-nrepl-port (not nrepl?))
+            (throw (ex-info "--nrepl-port requires --nrepl" {})))
         addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
         api-key (env "JOLT_LLM_PROXY_API_KEY" "")
         ;; ring-chez-adapter is loopback-only; reject misleading hosts.
@@ -159,10 +171,11 @@
         _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
             (throw (ex-info "JOLT_LLM_PROXY_ADDR must use 127.0.0.1 or localhost"
                             {:address addr})))
-        port (if port-str (Integer/parseInt port-str) 8080)
+        port (or cli-port (if port-str (Integer/parseInt port-str) 8080))
         nrepl-port (when nrepl?
-                     (Integer/parseInt (env "JOLT_NREPL_PORT"
-                                             (str default-nrepl-port))))]
+                     (or cli-nrepl-port
+                         (Integer/parseInt (env "JOLT_NREPL_PORT"
+                                                (str default-nrepl-port)))))]
     (start! :port port :api-key api-key :nrepl-port nrepl-port
             :dashboard dashboard?)
     ;; Block until interrupted.

@@ -54,5 +54,17 @@
   (is (true? (core/nrepl-flag? ["--nrepl"])))
   (is (= {:dashboard true}
          (core/serve-options ["--dashboard"])))
+  (is (= {:port 8090}
+         (core/serve-options ["--port" "8090"])))
+  (is (= {:port 8090}
+         (core/serve-options ["-p" "8090"])))
+  (is (= {:nrepl true :nrepl-port 7889}
+         (core/serve-options ["--nrepl" "--nrepl-port" "7889"])))
+  (is (= {:nrepl-port 7889}
+         (core/serve-options ["-np" "7889"])))
+  (is (thrown? Throwable (core/serve-options ["--port" "0"])))
+  (is (thrown? Throwable (core/serve-options ["--nrepl-port" "65536"])))
+  (is (thrown? Throwable (core/serve-command {:opts {:nrepl-port 7889}})))
+  (is (thrown? Throwable (core/serve-options ["--port" "65536"])))
   (is (thrown? Throwable (core/serve-options ["--unexpected"])))
   (is (thrown? Throwable (core/serve-options ["unexpected-argument"]))))

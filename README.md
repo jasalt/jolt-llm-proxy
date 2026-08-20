@@ -46,13 +46,16 @@ substitute `./target/jolt-llm-proxy` for `jolt -m llm-proxy.core` after building
 jolt -m llm-proxy.core login
 # Or after building: ./target/jolt-llm-proxy login
 
-# Serve an OpenAI-compatible API (env: JOLT_LLM_PROXY_ADDR, JOLT_LLM_PROXY_API_KEY):
-JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve
-# Or: JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 JOLT_LLM_PROXY_API_KEY=my-key ./target/jolt-llm-proxy serve
+# Serve an OpenAI-compatible API. --port/-p is the proxy HTTP port and
+# overrides the port in JOLT_LLM_PROXY_ADDR:
+JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve --port 8090
+# Or: JOLT_LLM_PROXY_API_KEY=my-key ./target/jolt-llm-proxy serve -p 8090
+# JOLT_LLM_PROXY_ADDR=127.0.0.1:8090 remains available for configuration.
 
 # Development/debug only: start the proxy and a loopback nREPL for CIDER,
-# Calva, or Cursive. Defaults to 127.0.0.1:7888; set JOLT_NREPL_PORT to change it.
-jolt -m llm-proxy.core serve --nrepl
+# Calva, or Cursive. The nREPL port defaults to 127.0.0.1:7888; set it with
+# --nrepl-port/-np (which requires --nrepl), or JOLT_NREPL_PORT.
+jolt -m llm-proxy.core serve --nrepl --nrepl-port 7889
 
 # Optional local read-only browser dashboard with live Datastar SSE updates.
 # It is disabled by default and is available at /_llm-proxy/.
