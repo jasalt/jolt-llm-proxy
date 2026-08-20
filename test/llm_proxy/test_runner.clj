@@ -7,6 +7,7 @@
             [llm-proxy.proxy-test]
             [llm-proxy.schema-test]
             [codex.translate-test]
+            [codex.ws-test]
             [llm-proxy.transport-sse-test]
             [llm-proxy.dashboard-test]))
 
@@ -19,6 +20,7 @@
                      'llm-proxy.proxy-test
                      'llm-proxy.schema-test
                      'codex.translate-test
+                     'codex.ws-test
                      'llm-proxy.transport-sse-test
                      'llm-proxy.dashboard-test)]
     (when (pos? (+ fail error))

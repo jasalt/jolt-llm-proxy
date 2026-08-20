@@ -18,16 +18,31 @@
    :requests (atom 0)
    :dashboard-enabled true})
 
-(deftest dashboard-is-optional
+(deftest dashboard-is-optional-and-excluded-from-request-metrics
   (let [request {:request-method :get :uri "/_llm-proxy" :headers {}}
-        disabled (proxy/make-handler (assoc (runtime) :dashboard-enabled false))
-        enabled (proxy/make-handler (runtime))]
+        disabled-runtime (assoc (runtime) :dashboard-enabled false)
+        enabled-runtime (runtime)
+        disabled (proxy/make-handler disabled-runtime)
+        enabled (proxy/make-handler enabled-runtime)
+        response (enabled request)]
     (is (= 404 (:status (disabled request))))
-    (is (= 200 (:status (enabled request))))
-    (is (.contains (get-in (enabled request) [:headers "Content-Security-Policy"])
+    (is (= 200 (:status response)))
+    (is (= 0 @(:requests enabled-runtime)))
+    (is (.contains (get-in response [:headers "Content-Security-Policy"])
                    "'unsafe-eval'"))
     (is (not (re-find #"secret-token|secret-api-key|raw-session-id"
-                      (:body (enabled request)))))))
+                      (:body response))))))
+
+(deftest dashboard-routes-do-not-increment-request-metric
+  (let [rt (runtime)
+        handler (proxy/make-handler rt)]
+    (doseq [uri ["/_llm-proxy/" "/_llm-proxy/datastar.js" "/_llm-proxy/events"]]
+      (let [response (handler {:request-method :get :uri uri :headers {}})]
+        (is (= 0 @(:requests rt)) uri)
+        (when (= uri "/_llm-proxy/events")
+          (async/close! (:body response)))))
+    (handler {:request-method :get :uri "/health" :headers {}})
+    (is (= 1 @(:requests rt)))))
 
 (deftest dashboard-serves-vendored-datastar
   (let [response (dashboard/route (runtime)
