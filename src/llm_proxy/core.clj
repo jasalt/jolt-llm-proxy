@@ -11,7 +11,8 @@
             [codex.ws :as ws]
             [llm-proxy.proxy :as proxy]
             [codex.cli :as cli]
-            [llm-proxy.id :as id]))
+            [llm-proxy.id :as id]
+            [llm-proxy.time :as time]))
 
 ;; ---------------------------------------------------------------------------
 ;; System atom
@@ -22,7 +23,7 @@
 (defn- random-session-id [random-hex]
   (random-hex 16))
 
-(defn system-now-ms [] (System/currentTimeMillis))
+(defn system-now-ms [] (time/now-ms))
 
 ;; ---------------------------------------------------------------------------
 ;; Start / stop

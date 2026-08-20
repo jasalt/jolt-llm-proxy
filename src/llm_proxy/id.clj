@@ -3,11 +3,22 @@
   plus a short hash for correlating identifiers in logs without printing the
   raw value.")
 
+(def ^:dynamic *random-bytes*
+  "Cryptographically secure bytes in production; bind only in synchronous leaf tests."
+  (fn [byte-count]
+    (let [bytes (byte-array byte-count)]
+      (.nextBytes (java.security.SecureRandom.) bytes)
+      bytes)))
+
+(defn random-bytes
+  "Return cryptographically random bytes, or bytes supplied by a test binding."
+  [byte-count]
+  (*random-bytes* byte-count))
+
 (defn random-hex
   "Return `byte-count` cryptographically random bytes as lower-case hex."
   [byte-count]
-  (let [bytes (byte-array byte-count)]
-    (.nextBytes (java.security.SecureRandom.) bytes)
+  (let [bytes (random-bytes byte-count)]
     (loop [index 0 out (StringBuilder.)]
       (if (>= index byte-count)
         (.toString out)

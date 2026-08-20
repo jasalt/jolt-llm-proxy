@@ -16,7 +16,8 @@
             [llm-proxy.transport.sse :as transport-sse]
             [llm-proxy.transport.ws :as transport-ws]
             [llm-proxy.dashboard :as dashboard]
-            [llm-proxy.id :as id]))
+            [llm-proxy.id :as id]
+            [llm-proxy.time :as time]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.
@@ -98,7 +99,7 @@
    :body (json/write-str {:status "ok"})})
 
 (defn models [runtime _req]
-  (let [now (long (/ ((or (:now-ms runtime) #(System/currentTimeMillis))) 1000))
+  (let [now (long (/ ((or (:now-ms runtime) time/now-ms)) 1000))
         data (vec (map (fn [id] {:id id :object "model"
                                  :created now :owned_by "openai-codex"})
                        model-ids))]

@@ -9,7 +9,8 @@
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
             [jolt.http-client :as http]
-            [jolt.ffi :as ffi]))
+            [jolt.ffi :as ffi]
+            [llm-proxy.time :as time]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -19,7 +20,7 @@
 (def auth-base-url "https://auth.openai.com")
 (def refresh-margin-ms (* 5 60 1000))   ; refresh if <5min left
 
-(defn system-now-ms [] (System/currentTimeMillis))
+(defn system-now-ms [] (time/now-ms))
 
 (def default-dependencies
   "Side-effect seams carried by a token store. Production uses these defaults;

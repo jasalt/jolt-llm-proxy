@@ -2,7 +2,8 @@
   "Redacted, serialization-safe runtime inspection snapshots."
   (:require [codex.auth :as auth]
             [codex.ws :as ws]
-            [llm-proxy.id :as id]))
+            [llm-proxy.id :as id]
+            [llm-proxy.time :as time]))
 
 (def dashboard-session-limit 8)
 
@@ -44,7 +45,7 @@
 (defn snapshot
   "Return only safe scalar operational state from an application runtime."
   [runtime]
-  (let [now ((or (:now-ms runtime) #(System/currentTimeMillis)))
+  (let [now ((or (:now-ms runtime) time/now-ms))
         started-at (:started-at runtime)]
     {:started-at started-at
      :uptime-seconds (elapsed-seconds now started-at)

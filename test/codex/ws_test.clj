@@ -1,6 +1,8 @@
 (ns codex.ws-test
   (:require [clojure.test :refer [deftest is testing]]
-            [codex.ws :as ws]))
+            [codex.ws :as ws]
+            [llm-proxy.id]
+            [llm-proxy.time]))
 
 (defn- bytes [& xs]
   (byte-array (map #(unchecked-byte %) xs)))
@@ -32,6 +34,13 @@
             :wlock (Object.) :rlock (Object.)
             :buffer (atom {:data (byte-array 0) :pos 0})}
      :writes writes}))
+
+(deftest leaf-time-and-randomness-bindings-are-deterministic
+  (binding [llm-proxy.time/*now-ms* (constantly 1234)
+            llm-proxy.id/*random-bytes* (fn [n] (byte-array (repeat n 42)))]
+    (is (= 1234 (llm-proxy.time/now-ms)))
+    (is (= "2a2a" (llm-proxy.id/random-hex 2)))
+    (is (= "KioqKioqKioqKioqKioqKg==" (ws/handshake-key)))))
 
 (deftest frame-length-boundaries-and-partial-reads
   (doseq [n [0 1 125 126 65535 65536]]

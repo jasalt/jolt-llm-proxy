@@ -6,7 +6,9 @@
             [clojure.data.json :as json]
             [ring-chez.adapter :as adapter]
             [jolt.http-client :as http]
-            [codex.auth :as auth]))
+            [codex.auth :as auth]
+            [llm-proxy.id :as id]
+            [llm-proxy.time :as time]))
 
 (def redirect-uri "http://localhost:1455/auth/callback")
 (def device-redirect-uri "https://auth.openai.com/deviceauth/callback")
@@ -26,9 +28,7 @@
       (.replace "=" "")))
 
 (defn random-bytes [n]
-  (let [b (byte-array n)]
-    (.nextBytes (java.security.SecureRandom.) b)
-    b))
+  (id/random-bytes n))
 
 (defn sha256-bytes
   [s]
@@ -133,12 +133,12 @@
                       "&id_token_add_organizations=true"
                       "&codex_cli_simplified_flow=true"
                       "&originator=pi")
-        deadline (+ (System/currentTimeMillis) (* 5 60 1000))
+        deadline (+ (time/now-ms) (* 5 60 1000))
         outcome (try
                   (loop []
                     (cond
                       (realized? result) @result
-                      (>= (System/currentTimeMillis) deadline) {:error "OAuth login timed out"}
+                      (>= (time/now-ms) deadline) {:error "OAuth login timed out"}
                       :else (do (Thread/sleep 500) (recur))))
                   (finally
                     (adapter/stop-server server)))]
@@ -178,8 +178,8 @@
       (println "Waiting for authorization...")
       (open-browser device-verification-uri)
       (loop [interval (device-interval (:interval body))
-             deadline (+ (System/currentTimeMillis) (* 15 60 1000))]
-        (when (>= (System/currentTimeMillis) deadline)
+             deadline (+ (time/now-ms) (* 15 60 1000))]
+        (when (>= (time/now-ms) deadline)
           (throw (ex-info "device login timed out" {})))
         (Thread/sleep (long interval))
         (let [poll (http/post (str auth/auth-base-url "/api/accounts/deviceauth/token")
@@ -363,7 +363,7 @@
       (when (number? (:iat payload)) (line "Issued at" (rfc1123 (:iat payload))))
       (when (number? (:exp payload)) (line "JWT expires" (rfc1123 (:exp payload))))
       (when (pos? (or (:expires_at cred) 0))
-        (let [expired (> (System/currentTimeMillis) (:expires_at cred))]
+        (let [expired (> (time/now-ms) (:expires_at cred))]
           (line "Token expires at" (str (rfc1123 (/ (:expires_at cred) 1000))
                                         " (" (if expired "expired" "valid") ")"))))
       (line "Refresh token" (if (empty? (:refresh_token cred)) "missing" "present"))

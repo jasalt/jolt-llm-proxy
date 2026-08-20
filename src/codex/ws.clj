@@ -11,6 +11,8 @@
   event protocol, and continuation-aware pool are Codex-specific."
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
+            [llm-proxy.time :as time]
+            [llm-proxy.id :as id]
             [jolt.http.tls :as tls]
             [jolt.host]))
 
@@ -34,9 +36,7 @@
 (defn handshake-key
   "16 random bytes, base64-std encoded (the Sec-WebSocket-Key value)."
   []
-  (let [b (byte-array 16)]
-    (.nextBytes (java.security.SecureRandom.) b)
-    (.encodeToString (java.util.Base64/getEncoder) b)))
+  (.encodeToString (java.util.Base64/getEncoder) (id/random-bytes 16)))
 
 (defn accept-key
   "Expected Sec-WebSocket-Accept: SHA-1 of `key` + `ws-guid`, base64-std."
@@ -100,8 +100,7 @@
         wfn (:wfn conn)
         pl (if (string? payload) (.getBytes payload "UTF-8") payload)
         n (alength pl)
-        mask (byte-array 4)]
-    (.nextBytes (java.security.SecureRandom.) mask)
+        mask (id/random-bytes 4)]
     (let [hsize (cond (< n 126) 2 (< n 65536) 4 :else 10)
           frame (byte-array (+ hsize 4 n))]
       (aset frame 0 (unchecked-byte (bit-or 0x80 opcode)))
@@ -204,7 +203,7 @@
               :wlock (Object.) :rlock (Object.)
               :buffer (atom {:data leftover :pos 0})
               :session-id session-id
-              :created-at (System/currentTimeMillis)
+              :created-at (time/now-ms)
               :closed? (atom false)
               :continuation (atom nil)
               :accept-ok accept-ok}]
@@ -338,7 +337,7 @@
 
 (defn make-pool
   "Create isolated state for one application's cached WS sessions."
-  ([] (make-pool #(System/currentTimeMillis)))
+  ([] (make-pool time/now-ms))
   ([now-ms] {:sessions (atom {}) :lock (Object.) :now-ms now-ms}))
 
 (defn- new-conn [header-builder session-id]

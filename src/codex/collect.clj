@@ -10,7 +10,8 @@
   (:require [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
-            [llm-proxy.id :as id]))
+            [llm-proxy.id :as id]
+            [llm-proxy.time :as time]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared helpers
@@ -183,7 +184,7 @@
   upstream failure — a failed stream never reports success."
   ([read-fn model ch] (stream-chat read-fn model ch {}))
   ([read-fn model ch {:keys [now-ms random-hex]
-                      :or {now-ms #(System/currentTimeMillis)
+                      :or {now-ms time/now-ms
                            random-hex id/random-hex}}]
    (let [id (str "chatcmpl-" (random-hex 16))
          created (long (/ (now-ms) 1000))
@@ -238,7 +239,7 @@
   event."
   ([read-fn model] (collect-chat read-fn model {}))
   ([read-fn model {:keys [now-ms random-hex]
-                   :or {now-ms #(System/currentTimeMillis)
+                   :or {now-ms time/now-ms
                         random-hex id/random-hex}}]
    (let [collector (atom (new-chat-collector))]
     (try
