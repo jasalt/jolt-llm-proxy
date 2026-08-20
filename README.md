@@ -68,6 +68,7 @@ curl -H 'Authorization: Bearer my-key' -H 'Content-Type: application/json' \
 jolt -m llm-proxy.core usage   # weekly Codex allowance
 jolt -m llm-proxy.core info     # credentials + JWT claims
 jolt -m llm-proxy.core logout
+jolt -m llm-proxy.core licenses # third-party license notice
 ```
 
 The dashboard is loopback-only, read-only, and must not be exposed through a

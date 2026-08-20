@@ -1,6 +1,7 @@
 (ns llm-proxy.core
   "Server startup, runtime state, and CLI entry point."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [babashka.cli :as bcli]
             [clojure.tools.logging :as log]
             [ring-chez.adapter :as adapter]
@@ -169,6 +170,12 @@
       (Thread. ^Runnable stop!))
     @(promise)))
 
+(defn licenses-command
+  "Print the embedded third-party-license notice. The resource is included in
+  standalone builds through the repository's `:jolt/build :embed` setting."
+  [_]
+  (print (slurp (io/resource "THIRD_PARTY_LICENSES.md"))))
+
 (def command-tree
   "Extensible command tree. `:restrict` rejects unrecognized command options."
   {:cmd {"serve" {:fn serve-command
@@ -183,7 +190,9 @@
          "usage" {:fn (fn [_] (cli/usage!))
                   :doc "Show weekly Codex allowance"}
          "info" {:fn (fn [_] (cli/info!))
-                 :doc "Show saved credential and JWT information"}}})
+                 :doc "Show saved credential and JWT information"}
+         "licenses" {:fn licenses-command
+                     :doc "Show third-party license notice"}}})
 
 (defn -main [& args]
   ;; Preserve the historical no-argument behavior while gaining generated help,

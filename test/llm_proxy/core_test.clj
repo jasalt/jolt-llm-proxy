@@ -43,6 +43,12 @@
     (core/stop!)
     (is (= 1 @stopped))))
 
+(deftest licenses-command-prints-the-embedded-notice
+  (let [out (with-out-str (core/licenses-command {}))]
+    (is (.contains out "This software is licensed under the MIT License."))
+    (is (.contains out "third-party open-source"))
+    (is (.contains out "https://github.com/jasalt/jolt-llm-proxy"))))
+
 (deftest parses-only-the-explicit-serve-options
   (is (false? (core/nrepl-flag? [])))
   (is (true? (core/nrepl-flag? ["--nrepl"])))
