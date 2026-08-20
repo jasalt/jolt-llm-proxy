@@ -226,7 +226,7 @@ See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §7–§8.
 
 ## References
 
-- Original Go implementation: [`../chatgpt-openai-api-adapter/`](../chatgpt-openai-api-adapter/)
+- Original Go implementation: https://github.com/jasalt/chatgpt-openai-api-adapter
   (`proxy.go`, `websocket.go`, `continuation.go`, `translate.go`, `auth.go`).
 - Jolt: <https://github.com/jolt-lang/jolt> · `llms.txt` at its repo root.
 - ring-chez-adapter: <https://github.com/jolt-lang/ring-chez-adapter>
