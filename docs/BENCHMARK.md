@@ -1,5 +1,7 @@
 # Memory benchmark and optimization findings 26-08-20
 
+**Benchmark below led to finding Jolt compiler optimization bug that has been solved, Ruuter adds more towards 2MiB to idle RSS with optimizations on after the fix https://github.com/jolt-lang/jolt/pull/685**
+
 ## Scope
 
 This is an idle-memory investigation of the standalone Jolt build. Initial
@@ -118,10 +120,10 @@ Ruuter was removed from `deps.edn` and replaced with a direct exact
 method/path dispatcher in `llm-proxy.proxy`. The optimized rebuilt server was
 measured with the same procedure:
 
-| Configuration | RSS | PSS | Threads |
-|---|---:|---:|---:|
-| HTTP only | **58.8 MiB** | 53.0 MiB | 11 |
-| Dashboard + nREPL | **59.1 MiB** | 53.3 MiB | 12 |
+| Configuration     |          RSS |      PSS | Threads |
+|-------------------|-------------:|---------:|--------:|
+| HTTP only         | **58.8 MiB** | 53.0 MiB |      11 |
+| Dashboard + nREPL | **59.1 MiB** | 53.3 MiB |      12 |
 
 This is approximately a 56 MiB RSS reduction, or 42%, from the 134.7 MiB
 HTTP-only baseline, and meets the idle RSS target with substantial margin.
