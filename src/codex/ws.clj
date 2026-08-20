@@ -336,8 +336,6 @@
 ;; Per-session connection pool
 ;; ---------------------------------------------------------------------------
 
-(def pool (atom {}))
-
 ;; A stable lock covers every pool map transition. Network dialing is currently
 ;; performed under this lock: connection creation is rare and correctness is
 ;; more important than parallel handshakes. It also makes custom pools passed by
@@ -405,8 +403,7 @@
 (defn acquire
   "Atomically acquire a WebSocket session. A cached socket has at most one
   reader/owner; concurrent requests receive one-off connections."
-  ([session-id header-builder] (acquire pool session-id header-builder))
-  ([pl session-id header-builder]
+  [pl session-id header-builder]
    (if (or (nil? session-id) (= session-id ""))
      (one-off-acquisition header-builder session-id)
      (locking pool-lock
@@ -447,7 +444,7 @@
                     (assoc sess :busy true :idle-future nil
                            :last-used (System/currentTimeMillis)))
              {:conn (:conn sess) :reused true
-              :release (releaser pl session-id (:conn sess))})))))))
+              :release (releaser pl session-id (:conn sess))}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Continuation state accessors (per-connection, used by llm-proxy.proxy)

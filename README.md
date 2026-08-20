@@ -120,6 +120,9 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ llm-proxy.
   Parses client JSON with string keys, delegates structural checks to
   `llm-proxy.schema`, and then performs policy-aware normalization; unknown
   top-level `/v1/responses` keys pass through upstream unchanged.
+- **`llm-proxy.transport.sse`** / **`llm-proxy.transport.ws`** — generic
+  transport adapters that expose a common event-source contract while keeping
+  the Codex WebSocket protocol implementation in `codex.ws`.
 - **`codex.cli`** — `login` (browser PKCE + headless device code), `logout`,
   `usage` (weekly allowance), `info` (JWT claim dump); ports Go `auth.go`/
   `usage.go`/`info.go`.
