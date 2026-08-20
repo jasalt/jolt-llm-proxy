@@ -27,6 +27,9 @@
                                   (swap! requests conj [url options])
                                   {:status 200
                                    :body "{\"access_token\":\"new\",\"expires_in\":60}"})})]
+    ;; Exception to ADR 260820A: this fully synchronous test suppresses
+    ;; credential-file I/O and JWT parsing. Replace with explicit seams if
+    ;; token refresh can perform asynchronous work.
     (with-redefs [auth/save-cred! (fn [_ cred] cred)
                   auth/account-id-from-jwt (constantly "new-account")]
       (is (= ["new" "new-account"] (auth/token store)))

@@ -16,10 +16,11 @@ outlive a test scope.
 Use two deliberately different seams:
 
 1. **Explicit dependencies for owned, asynchronous, or external resources.**
-   Runtime maps retain `:now-ms`, `:http-post`, and, where required, HTTP GET
-   equivalents. A WebSocket pool captures its own `:now-ms` with its sessions
-   atom and lock. These values remain stable across idle-expiry futures and
-   allow multiple application instances to use independent test dependencies.
+   Runtime maps retain `:now-ms` and `:http-post`. A WebSocket pool captures
+   its own `:now-ms` with its sessions atom and lock. These values remain
+   stable across idle-expiry futures and allow multiple application instances
+   to use independent test dependencies. No HTTP GET seam is currently
+   required; the CLI usage fetch calls `http/get` directly.
 2. **Dynamic utilities for synchronous leaf code only.**
    `llm-proxy.time/*now-ms*` and `llm-proxy.id/*random-bytes*` provide the
    production wall clock and `SecureRandom` bytes. Tests may override them
@@ -27,10 +28,11 @@ Use two deliberately different seams:
    `id/random-hex`.
 
 Do not use `with-redefs` as routine dependency injection. It remains suitable
-only for narrowly scoped legacy tests where no asynchronous work escapes.
-
-No log event may include tokens, prompts, authorization headers, raw session
-identifiers, OAuth codes, or arbitrary upstream response bodies.
+only for narrowly scoped, fully synchronous tests where no asynchronous work
+escapes and no concurrent test can observe the root-Var redefinition. Document
+the case-specific reason, synchronous boundary, and condition requiring a
+replacement seam in a comment immediately above every permitted use. Prefer an
+explicit dependency or lexical `binding` when either is practical.
 
 ## Consequences
 
@@ -45,3 +47,5 @@ identifiers, OAuth codes, or arbitrary upstream response bodies.
 
 `test/codex/auth_test.clj` injects a clock and HTTP POST for token refresh, and
 `test/llm_proxy/proxy_test.clj` injects the runtime clock for model timestamps.
+`test/codex/ws_test.clj` binds the dynamic clock and random-byte utilities for
+deterministic synchronous leaf-code tests.

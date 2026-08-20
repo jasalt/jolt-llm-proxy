@@ -109,6 +109,9 @@
   (let [pool (ws/make-pool (constantly 1000))
         dials (atom 0)
         conn (fn [n] {:closed? (atom true) :id n})]
+    ;; Exception to ADR 260820A: ws/acquire invokes dial synchronously, so
+    ;; this test can avoid opening sockets. Add an explicit pool :dial seam if
+    ;; dialing becomes asynchronous or this test can run concurrently.
     (with-redefs [ws/dial (fn [& _] (conn (swap! dials inc)))]
       (let [first (ws/acquire pool "session" (constantly ["token" "account"]))
             concurrent (ws/acquire pool "session" (constantly ["token" "account"]))]
