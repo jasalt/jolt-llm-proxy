@@ -1,6 +1,7 @@
 (ns llm-proxy.core
   "Server startup, runtime state, and CLI entry point."
   (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [ring-chez.adapter :as adapter]
             [jolt.nrepl :as nrepl]
             ;; Kept as a concrete require so Jolt includes the middleware in a
@@ -76,14 +77,13 @@
                                :stop-server stop-server
                                :stop-nrepl stop-nrepl)]
             (reset! system running)
-            (println (str "Proxy listening on http://127.0.0.1:" port))
             ;; Correlate sessions via a short hash; never log the raw id.
-            (println (str "  session-id: " (id/short-hash session-id) " (hashed)"))
-            (println (str "  api-key auth: " (if (= api-key "") "disabled" "enabled")))
-            (when nrepl-port
-              (println (str "  nREPL: 127.0.0.1:" nrepl-port)))
-            (when dashboard
-              (println (str "  dashboard: http://127.0.0.1:" port "/_llm-proxy/")))
+            (log/info {:event :proxy-started
+                       :address (str "127.0.0.1:" port)
+                       :session-hash (id/short-hash session-id)
+                       :api-key-guard (not= api-key "")
+                       :nrepl-port nrepl-port
+                       :dashboard-enabled dashboard})
             running)
           (catch Throwable e
             (when-let [stop-nrepl (:stop-nrepl @started)]
@@ -110,7 +110,7 @@
       (doseq [[_ sess] @pool]
         (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
       (reset! pool {}))
-    (println "Proxy stopped.")))
+    (log/info {:event :proxy-stopped})))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI

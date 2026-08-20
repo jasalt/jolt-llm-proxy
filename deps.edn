@@ -24,5 +24,8 @@
         jolt-lang/nrepl
         {:git/url "https://github.com/jolt-lang/nrepl"
          :git/tag "v0.1.0"
-         :git/sha "3cfc0bdf0dd894bcaf22f4e70f31c590e2450c74"}}
+         :git/sha "3cfc0bdf0dd894bcaf22f4e70f31c590e2450c74"}
+        org.clojure/tools.logging
+        {:git/url "https://github.com/jolt-lang/logging"
+         :git/sha "ec6747e55583118d881faf4ab41e68d7e587ce4c"}}
  :nrepl/middleware [nrepl.middleware/default-middleware]}

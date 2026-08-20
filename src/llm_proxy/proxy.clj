@@ -8,13 +8,15 @@
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
             [clojure.core.async :as async]
+            [clojure.tools.logging :as log]
             [ring-chez.sse :as sse]
             [ruuter.core :as ruuter]
             [codex.collect :as collect]
             [codex.translate :as tr]
             [llm-proxy.transport.sse :as transport-sse]
             [llm-proxy.transport.ws :as transport-ws]
-            [llm-proxy.dashboard :as dashboard]))
+            [llm-proxy.dashboard :as dashboard]
+            [llm-proxy.id :as id]))
 
 ;; Runtime dependencies are passed explicitly through a handler closure made by
 ;; `make-handler`; this namespace owns no application lifecycle state.
@@ -117,9 +119,10 @@
     (if (and pool (not= session-id "") (not= session-id default-session))
       (try
         (transport-ws/source runtime request session-id for-chat)
-        (catch Throwable e
-          (println "websocket transport unavailable, falling back to SSE:"
-                   (.getMessage ^Throwable e))
+        (catch Throwable error
+          (log/warn {:event :ws-fallback
+                     :session-hash (when session-id (id/short-hash session-id))
+                     :error-type (:type (ex-data error))})
           (sse-source runtime request session-id)))
       (sse-source runtime request session-id))))
 

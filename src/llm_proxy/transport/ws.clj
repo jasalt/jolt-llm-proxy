@@ -1,9 +1,11 @@
 (ns llm-proxy.transport.ws
   "Pooled WebSocket event-source lifecycle and continuation state."
   (:require [clojure.data.json :as json]
+            [clojure.tools.logging :as log]
             [codex.auth :as auth]
             [codex.ws :as ws]
-            [codex.continuation :as continuation]))
+            [codex.continuation :as continuation]
+            [llm-proxy.id :as id]))
 
 (defn- acquire-request [pool full-body session-id header-builder]
   (let [acquisition (ws/acquire pool session-id header-builder)
@@ -30,7 +32,8 @@
         (acquire-request pool full-body session-id header-builder)]
     (try
       (when used-delta?
-        (println "ws-source: using delta continuation"))
+        (log/debug {:event :ws-delta-continuation
+                    :session-hash (when session-id (id/short-hash session-id))}))
       (ws/write-text (:conn acquisition)
                      (json/write-str (assoc request-body :type "response.create")))
       {:read
