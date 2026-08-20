@@ -255,5 +255,8 @@
                   (assoc runtime :requests (atom 0)))
         routes (ruuter/compile-routes (route-table runtime))]
     (fn [req]
-      (swap! (:requests runtime) inc)
+      ;; Dashboard page, bundle, and SSE polling are operator traffic rather
+      ;; than proxied client requests; keep them out of the API request metric.
+      (when-not (str/starts-with? (or (:uri req) "") "/_llm-proxy")
+        (swap! (:requests runtime) inc))
       (ruuter/route routes req))))
