@@ -29,6 +29,10 @@
 (def ws-idle-ttl-ms (* 5 60 1000))
 (def ws-max-pooled-sessions 128)
 
+;; A narrow dial seam keeps handshake tests offline without broadening the
+;; public connection API.
+(def ^:dynamic *tls-connect* tls/tls-connect)
+
 ;; ---------------------------------------------------------------------------
 ;; Handshake key + accept
 ;; ---------------------------------------------------------------------------
@@ -156,7 +160,7 @@
   leftover frame bytes, and slots for pool state. Throws if the upgrade fails
   or the accept key mismatches."
   [token account-id session-id]
-  (let [st (tls/tls-connect "chatgpt.com" 443 false 20000 20000)
+  (let [st (*tls-connect* "chatgpt.com" 443 false 20000 20000)
         wfn (jolt.host/ref-get st :write)
         rfn (jolt.host/ref-get st :read)
         key (handshake-key)
@@ -198,7 +202,8 @@
         header-str (String. header-bytes "ISO-8859-1")
         status-line (first (str/split-lines header-str))
         accept (get-header header-str "sec-websocket-accept")
-        accept-ok (= accept (accept-key key))
+        status-ok (boolean (re-matches #"HTTP/\d\.\d 101(?:\s.*)?" status-line))
+        accept-ok (and status-ok (= accept (accept-key key)))
         conn {:stream st :wfn wfn :rfn rfn
               :wlock (Object.) :rlock (Object.)
               :buffer (atom {:data leftover :pos 0})
@@ -209,8 +214,8 @@
               :accept-ok accept-ok}]
     (when-not accept-ok
       (close-conn conn)
-      (throw (ex-info "ws: handshake accept key mismatch"
-                      {:status status-line :accept accept})))
+      (throw (ex-info "ws: WebSocket upgrade rejected"
+                      {:status status-line :accept-present (some? accept)})))
     conn))
 
 
