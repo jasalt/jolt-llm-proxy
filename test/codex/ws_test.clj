@@ -88,8 +88,16 @@
   (is (= "response.done"
          (:type (ws/read-event {:data (.getBytes "{\"type\":\"response.done\"}" "UTF-8")})))))
 
+(deftest pool-resources-are-isolated
+  (let [one (ws/make-pool (constantly 1000))
+        two (ws/make-pool (constantly 2000))]
+    (is (not (identical? (:sessions one) (:sessions two))))
+    (is (not (identical? (:lock one) (:lock two))))
+    (is (= 1000 ((:now-ms one))))
+    (is (= 2000 ((:now-ms two))))))
+
 (deftest acquire-reuses-idle-connections-and-isolates-busy-owners
-  (let [pool (atom {})
+  (let [pool (ws/make-pool (constantly 1000))
         dials (atom 0)
         conn (fn [n] {:closed? (atom true) :id n})]
     (with-redefs [ws/dial (fn [& _] (conn (swap! dials inc)))]
@@ -104,19 +112,19 @@
           (is (= 2 @dials))
           (is (= true (:reused reused)))
           ((:release reused) false)))
-    (is (empty? @pool))))
+    (is (empty? @(:sessions pool)))))
 
 (deftest pool-release-is-idempotent-and-stale-safe
-  (let [pool (atom {})
+  (let [pool (ws/make-pool (constantly 1000))
         old {:closed? (atom true)}
         new {:closed? (atom true)}
         release (ws/releaser pool "session" old)]
-    (reset! pool {"session" {:conn old :busy true}})
+    (reset! (:sessions pool) {"session" {:conn old :busy true}})
     (release false)
     (release true)
-    (is (nil? (get @pool "session")))
+    (is (nil? (get @(:sessions pool) "session")))
     (let [stale (ws/releaser pool "session" old)]
-      (reset! pool {"session" {:conn new :busy true}})
+      (reset! (:sessions pool) {"session" {:conn new :busy true}})
       (stale false)
-      (is (= new (get-in @pool ["session" :conn])))
-      (is (= true (get-in @pool ["session" :busy])))))))
+      (is (= new (get-in @(:sessions pool) ["session" :conn])))
+      (is (= true (get-in @(:sessions pool) ["session" :busy])))))))

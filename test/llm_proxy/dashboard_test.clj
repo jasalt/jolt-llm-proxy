@@ -7,10 +7,12 @@
 
 (defn runtime []
   {:store (atom {:access_token "secret-token" :account_id "account"})
-   :pool (atom {"raw-session-id" {:busy false
+   :pool {:sessions (atom {"raw-session-id" {:busy false
                                    :created-at (- (System/currentTimeMillis) 2000)
                                    :last-used (- (System/currentTimeMillis) 1000)
                                    :conn {:continuation (atom {:id "private"})}}})
+          :lock (Object.)
+          :now-ms #(System/currentTimeMillis)}
    :session-id "raw-session-id"
    :api-key "secret-api-key"
    :port 8080

@@ -19,7 +19,7 @@
                       (some? @(:continuation conn)))})
 
 (defn- pool-summary [now pool]
-  (let [sessions (or (some-> pool deref) {})
+  (let [sessions (or (some-> pool :sessions deref) {})
         entries (vals sessions)]
     {:entries (count entries)
      :capacity ws/ws-max-pooled-sessions

@@ -60,7 +60,7 @@
                       {})))
     ;; Each start owns an isolated pool and an explicit handler dependency map.
     (let [session-id (random-session-id random-hex)
-          pool (atom {})
+          pool (ws/make-pool now-ms)
           runtime {:store store :pool pool :session-id session-id
                    :api-key api-key :port port :started-at (now-ms)
                    :now-ms now-ms :random-hex random-hex
@@ -95,9 +95,9 @@
               (try (stop-nrepl) (catch Throwable _ nil)))
             (when-let [srv (:server @started)]
               (try (stop-server srv) (catch Throwable _ nil)))
-            (doseq [[_ sess] @pool]
+            (doseq [[_ sess] @(:sessions pool)]
               (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
-            (reset! pool {})
+            (reset! (:sessions pool) {})
             (reset! system nil)
             (throw e)))))))
 
@@ -112,9 +112,9 @@
     (when-let [srv (:server running)]
       (try ((:stop-server running) srv) (catch Throwable _ nil)))
     (let [pool (:pool running)]
-      (doseq [[_ sess] @pool]
+      (doseq [[_ sess] @(:sessions pool)]
         (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
-      (reset! pool {}))
+      (reset! (:sessions pool) {}))
     (log/info {:event :proxy-stopped})))
 
 ;; ---------------------------------------------------------------------------

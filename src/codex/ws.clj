@@ -336,115 +336,97 @@
 ;; Per-session connection pool
 ;; ---------------------------------------------------------------------------
 
-;; A stable lock covers every pool map transition. Network dialing is currently
-;; performed under this lock: connection creation is rare and correctness is
-;; more important than parallel handshakes. It also makes custom pools passed by
-;; tests obey the same ownership rules.
-(def ^:private pool-lock (Object.))
+(defn make-pool
+  "Create isolated state for one application's cached WS sessions."
+  ([] (make-pool #(System/currentTimeMillis)))
+  ([now-ms] {:sessions (atom {}) :lock (Object.) :now-ms now-ms}))
 
 (defn- new-conn [header-builder session-id]
   (let [[token account-id] (header-builder)]
     (dial token account-id session-id)))
 
 (defn- one-off-acquisition [header-builder session-id]
-  (let [conn (new-conn header-builder session-id)
-        released? (atom false)]
+  (let [conn (new-conn header-builder session-id) released? (atom false)]
     {:conn conn :reused false
-     :release (fn [_]
-                (when (compare-and-set! released? false true)
-                  (close-conn conn)))}))
+     :release (fn [_] (when (compare-and-set! released? false true)
+                        (close-conn conn)))}))
 
-(defn- make-room!
-  "Evict the oldest idle session when the pool is at capacity. Returns true
-  when a cache slot is available; busy sessions are never interrupted."
-  [pl]
-  (if (< (count @pl) ws-max-pooled-sessions)
-    true
-    (when-let [[session-id session]
-               (first (sort-by (fn [[_ value]] (:last-used value))
-                               (filter (fn [[_ value]] (not (:busy value))) @pl)))]
-      (when-let [f (:idle-future session)] (future-cancel f))
-      (swap! pl dissoc session-id)
-      (close-conn (:conn session))
-      true)))
+(defn- make-room! [pool]
+  (let [sessions (:sessions pool)]
+    (if (< (count @sessions) ws-max-pooled-sessions)
+      true
+      (when-let [[session-id session]
+                 (first (sort-by (fn [[_ value]] (:last-used value))
+                                 (filter (fn [[_ value]] (not (:busy value))) @sessions)))]
+        (when-let [f (:idle-future session)] (future-cancel f))
+        (swap! sessions dissoc session-id)
+        (close-conn (:conn session))
+        true))))
 
 (defn releaser
   "Return an idempotent release hook for exactly `conn`. Stale hooks never
   mutate a replacement pool entry."
-  [pl session-id conn]
-  (let [released? (atom false)]
+  [pool session-id conn]
+  (let [sessions (:sessions pool) released? (atom false)]
     (fn [keep]
       (when (compare-and-set! released? false true)
-        (locking pool-lock
-          (let [current (get @pl session-id)
-                owned? (= (:conn current) conn)]
+        (locking (:lock pool)
+          (let [current (get @sessions session-id) owned? (= (:conn current) conn)]
             (if (and keep owned?)
               (do
-                (swap! pl assoc session-id
+                (swap! sessions assoc session-id
                        (assoc current :busy false :idle-future nil
-                              :last-used (System/currentTimeMillis)))
+                              :last-used ((:now-ms pool))))
                 (let [f (future
                           (Thread/sleep ws-idle-ttl-ms)
-                          (locking pool-lock
-                            (let [session (get @pl session-id)]
-                              (when (and (= (:conn session) conn)
-                                         (not (:busy session)))
-                                (swap! pl dissoc session-id)
+                          (locking (:lock pool)
+                            (let [session (get @sessions session-id)]
+                              (when (and (= (:conn session) conn) (not (:busy session)))
+                                (swap! sessions dissoc session-id)
                                 (close-conn conn)))))]
-                  ;; Install only if this same idle entry still owns the key.
-                  (let [session (get @pl session-id)]
-                    (when (and (= (:conn session) conn)
-                               (not (:busy session)))
-                      (swap! pl assoc-in [session-id :idle-future] f)))))
+                  (let [session (get @sessions session-id)]
+                    (when (and (= (:conn session) conn) (not (:busy session)))
+                      (swap! sessions assoc-in [session-id :idle-future] f)))))
               (do
-                (when owned? (swap! pl dissoc session-id))
+                (when owned? (swap! sessions dissoc session-id))
                 (close-conn conn)))))))))
 
 (defn acquire
   "Atomically acquire a WebSocket session. A cached socket has at most one
   reader/owner; concurrent requests receive one-off connections."
-  [pl session-id header-builder]
-   (if (or (nil? session-id) (= session-id ""))
-     (one-off-acquisition header-builder session-id)
-     (locking pool-lock
-       (let [sess (get @pl session-id)]
-         (when-let [f (:idle-future sess)]
-           (future-cancel f))
-         (cond
-           (nil? sess)
-           (if (make-room! pl)
-             (let [now (System/currentTimeMillis)
-                   conn (new-conn header-builder session-id)
-                   entry {:conn conn :busy true :created-at now :last-used now
-                          :idle-future nil}]
-               (swap! pl assoc session-id entry)
-               {:conn conn :reused false
-                :release (releaser pl session-id conn)})
-             ;; Capacity is fully occupied by active requests; do not grow it.
-             (one-off-acquisition header-builder session-id))
+  [pool session-id header-builder]
+  (let [sessions (:sessions pool) now-ms (:now-ms pool)]
+    (if (or (nil? session-id) (= session-id ""))
+      (one-off-acquisition header-builder session-id)
+      (locking (:lock pool)
+        (let [sess (get @sessions session-id)]
+          (when-let [f (:idle-future sess)] (future-cancel f))
+          (cond
+            (nil? sess)
+            (if (make-room! pool)
+              (let [now (now-ms) conn (new-conn header-builder session-id)]
+                (swap! sessions assoc session-id {:conn conn :busy true :created-at now
+                                                   :last-used now :idle-future nil})
+                {:conn conn :reused false :release (releaser pool session-id conn)})
+              (one-off-acquisition header-builder session-id))
 
-           (:busy sess)
-           (one-off-acquisition header-builder session-id)
+            (:busy sess) (one-off-acquisition header-builder session-id)
 
-           (>= (- (System/currentTimeMillis) (:created-at sess)) ws-session-max-age-ms)
-           (do
-             (swap! pl dissoc session-id)
-             (close-conn (:conn sess))
-             (let [now (System/currentTimeMillis)
-                   conn (new-conn header-builder session-id)
-                   entry {:conn conn :busy true :created-at now :last-used now
-                          :idle-future nil}]
-               (swap! pl assoc session-id entry)
-               {:conn conn :reused false
-                :release (releaser pl session-id conn)}))
+            (>= (- (now-ms) (:created-at sess)) ws-session-max-age-ms)
+            (do
+              (swap! sessions dissoc session-id)
+              (close-conn (:conn sess))
+              (let [now (now-ms) conn (new-conn header-builder session-id)]
+                (swap! sessions assoc session-id {:conn conn :busy true :created-at now
+                                                   :last-used now :idle-future nil})
+                {:conn conn :reused false :release (releaser pool session-id conn)}))
 
-           :else
-           (do
-             (swap! pl assoc session-id
-                    (assoc sess :busy true :idle-future nil
-                           :last-used (System/currentTimeMillis)))
-             {:conn (:conn sess) :reused true
-              :release (releaser pl session-id (:conn sess))}))))))
+            :else
+            (do
+              (swap! sessions assoc session-id
+                     (assoc sess :busy true :idle-future nil :last-used (now-ms)))
+              {:conn (:conn sess) :reused true
+               :release (releaser pool session-id (:conn sess))})))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Continuation state accessors (per-connection, used by llm-proxy.proxy)
