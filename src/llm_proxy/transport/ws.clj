@@ -60,9 +60,13 @@
       (catch Throwable error
         (when-let [owned @acquisition]
           ((:release owned) false))
-        ;; The proxy can safely retry only failures in WS establishment or its
-        ;; initial write. Mark them explicitly; do not make every exception a
-        ;; reason to silently change transports.
-        (throw (ex-info "websocket transport setup failed"
-                        {:type :ws-transport}
-                        error))))))
+        ;; The proxy can safely retry WS establishment and initial-write
+        ;; failures through SSE. Preserve already classified failures (notably
+        ;; credential refresh errors) so they retain their correct public
+        ;; status and do not trigger a transport change.
+        (if (:type (ex-data error))
+          (throw error)
+          (throw (ex-info "websocket transport setup failed"
+                          {:type :ws-transport}
+                          error))))))
+)
