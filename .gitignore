@@ -4,3 +4,4 @@
 .cpcache/
 .lsp/
 *.log
+/target/
