@@ -181,9 +181,12 @@
   "Stream a chat completion over `ch` from the event source `read-fn`.
   Returns the response meta, with `:completed false` and `:error` set on
   upstream failure — a failed stream never reports success."
-  [read-fn model ch]
-  (let [id (str "chatcmpl-" (id/random-hex 16))
-        created (long (/ (System/currentTimeMillis) 1000))
+  ([read-fn model ch] (stream-chat read-fn model ch {}))
+  ([read-fn model ch {:keys [now-ms random-hex]
+                      :or {now-ms #(System/currentTimeMillis)
+                           random-hex id/random-hex}}]
+   (let [id (str "chatcmpl-" (random-hex 16))
+         created (long (/ (now-ms) 1000))
         collector (atom (new-chat-collector))
         emit (fn [delta]
                (sse/send! ch
@@ -227,14 +230,17 @@
     (let [meta (chat-response-meta @collector)]
       (if err
         (assoc meta :completed false :error err)
-        meta))))
+        meta)))))
 
 (defn collect-chat
   "Collect a full (non-streaming) chat completion from `read-fn`.
   Returns `[response meta]`; throws if the stream ends without a terminal
   event."
-  [read-fn model]
-  (let [collector (atom (new-chat-collector))]
+  ([read-fn model] (collect-chat read-fn model {}))
+  ([read-fn model {:keys [now-ms random-hex]
+                   :or {now-ms #(System/currentTimeMillis)
+                        random-hex id/random-hex}}]
+   (let [collector (atom (new-chat-collector))]
     (try
       (read-fn (fn [event] (swap! collector #(consume-chat % event nil))))
       (catch Throwable t (throw t)))
@@ -253,16 +259,16 @@
                                (if (= (.length (:text c)) 0)
                                  {:tool_calls calls :content nil}
                                  {:tool_calls calls}))))]
-        [{:id (str "chatcmpl-" (id/random-hex 16))
+        [{:id (str "chatcmpl-" (random-hex 16))
           :object "chat.completion"
-          :created (long (/ (System/currentTimeMillis) 1000))
+          :created (long (/ (now-ms) 1000))
           :model model
           :choices [{:index 0 :message message :finish_reason
                      (cond (:incomplete c) "length"
                            (pos? (count (:calls c))) "tool_calls"
                            :else "stop")}]
           :usage (openai-usage (:usage c))}
-         (chat-response-meta c)]))))
+         (chat-response-meta c)])))))
 
 ;; ---------------------------------------------------------------------------
 ;; Responses collector: /v1/responses

@@ -19,6 +19,14 @@
 (def auth-base-url "https://auth.openai.com")
 (def refresh-margin-ms (* 5 60 1000))   ; refresh if <5min left
 
+(defn system-now-ms [] (System/currentTimeMillis))
+
+(def default-dependencies
+  "Side-effect seams carried by a token store. Production uses these defaults;
+  tests can inject deterministic clock and HTTP functions."
+  {:now-ms system-now-ms
+   :http-post http/post})
+
 (def default-auth-path
   (let [env (System/getenv "JOLT_LLM_PROXY_AUTH_FILE")]
     (if (and env (not= env ""))
@@ -119,11 +127,12 @@
 
 (defn jwt-expiry-ms
   "Unix-ms expiry from the JWT `exp` claim (seconds), falling back to +1h."
-  [token]
-  (let [exp (get (decode-jwt-payload token) :exp)]
-    (if (number? exp)
-      (* (long exp) 1000)
-      (+ (System/currentTimeMillis) (* 60 60 1000)))))
+  ([token] (jwt-expiry-ms token system-now-ms))
+  ([token now-ms]
+   (let [exp (get (decode-jwt-payload token) :exp)]
+     (if (number? exp)
+       (* (long exp) 1000)
+       (+ (now-ms) (* 60 60 1000))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Refresh
@@ -133,10 +142,12 @@
   "POST an OAuth grant to /oauth/token and build a credential PMap from the
   response. `params` is a map of form parameters (grant_type, client_id, ...).
   `old-refresh` is reused when the response omits a refresh token."
-  [params old-refresh]
-  (let [resp (http/post (str auth-base-url "/oauth/token")
-              {:form-params params
-               :throw-exceptions false})]
+  ([params old-refresh] (exchange-token! params old-refresh default-dependencies))
+  ([params old-refresh {:keys [now-ms http-post]
+                        :or {now-ms system-now-ms http-post http/post}}]
+   (let [resp (http-post (str auth-base-url "/oauth/token")
+                {:form-params params
+                 :throw-exceptions false})]
     (when-not (= 200 (:status resp))
       (throw (ex-info "token exchange failed"
                       {:status (:status resp) :body (:body resp)})))
@@ -147,22 +158,24 @@
       (let [refresh (or (:refresh_token body) old-refresh)
             expires-in (:expires_in body)
             expires-at (if (and expires-in (pos? expires-in))
-                         (+ (System/currentTimeMillis) (* (long expires-in) 1000))
-                         (jwt-expiry-ms access))
+                         (+ (now-ms) (* (long expires-in) 1000))
+                         (jwt-expiry-ms access now-ms))
             account (account-id-from-jwt access)]
         {:access_token access
          :refresh_token refresh
          :expires_at expires-at
-         :account_id account}))))
+         :account_id account})))))
 
 (defn refresh-token!
   "Exchange the refresh token for a fresh credential PMap."
-  [cred]
-  (exchange-token!
-    {"grant_type" "refresh_token"
-     "client_id" client-id
-     "refresh_token" (:refresh_token cred)}
-    (:refresh_token cred)))
+  ([cred] (refresh-token! cred default-dependencies))
+  ([cred dependencies]
+   (exchange-token!
+     {"grant_type" "refresh_token"
+      "client_id" client-id
+      "refresh_token" (:refresh_token cred)}
+     (:refresh_token cred)
+     dependencies)))
 
 ;; ---------------------------------------------------------------------------
 ;; Stateful token store
@@ -171,10 +184,11 @@
 (defn start!
   "Load cred from `path` into an atom store and return it. The atom's value is
   the cred PMap merged with `:path` and `:lock`."
-  ([path]
+  ([path] (start! path default-dependencies))
+  ([path dependencies]
    (let [cred (load-cred path)]
-     (atom (assoc cred :path path :lock (Object.)))))
-  ([] (start! default-auth-path)))
+     (atom (merge (assoc cred :path path :lock (Object.)) default-dependencies dependencies))))
+  ([] (start! default-auth-path default-dependencies)))
 
 (defn authenticated?
   "True when the store has both an access token and an account id."
@@ -192,13 +206,14 @@
        (let [cred @store]
          (when (nil? (:access_token cred))
            (throw (ex-info "not logged in; run login" {})))
-         (if (or force (>= (+ (System/currentTimeMillis) refresh-margin-ms)
+         (if (or force (>= (+ ((:now-ms cred)) refresh-margin-ms)
                            (:expires_at cred)))
            (if (nil? (:refresh_token cred))
              (throw (ex-info "access token expired and no refresh token available; login again" {}))
              (let [newcred (refresh-token!
-                            (select-keys cred [:access_token :refresh_token]))
-                   merged (assoc newcred :path (:path cred) :lock (:lock cred))]
+                            (select-keys cred [:access_token :refresh_token])
+                            (select-keys cred [:now-ms :http-post]))
+                   merged (merge newcred (select-keys cred [:path :lock :now-ms :http-post]))]
                (save-cred! (:path cred) newcred)
                (reset! store merged)
                [(:access_token newcred) (:account_id newcred)]))
@@ -208,7 +223,7 @@
   "Clear the store and delete the credential file."
   [store]
   (let [path (:path @store)]
-    (reset! store {:path path :lock (:lock @store)})
+    (reset! store (select-keys @store [:path :lock :now-ms :http-post]))
     (let [f (java.io.File. path)]
       (when (and (.exists f) (not (.delete f)))
         (throw (ex-info "delete credential file failed"

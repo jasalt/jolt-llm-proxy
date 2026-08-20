@@ -44,7 +44,7 @@
 (defn snapshot
   "Return only safe scalar operational state from an application runtime."
   [runtime]
-  (let [now (System/currentTimeMillis)
+  (let [now ((or (:now-ms runtime) #(System/currentTimeMillis)))
         started-at (:started-at runtime)]
     {:started-at started-at
      :uptime-seconds (elapsed-seconds now started-at)

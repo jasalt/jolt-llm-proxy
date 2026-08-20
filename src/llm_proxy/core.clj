@@ -19,8 +19,10 @@
 
 (defonce system (atom nil))
 
-(defn- random-session-id []
-  (id/random-hex 16))
+(defn- random-session-id [random-hex]
+  (random-hex 16))
+
+(defn system-now-ms [] (System/currentTimeMillis))
 
 ;; ---------------------------------------------------------------------------
 ;; Start / stop
@@ -41,11 +43,13 @@
   "Initialise the proxy. Production defaults can be replaced at explicit
   dependency seams for deterministic lifecycle tests."
   [& {:keys [port api-key auth-path store run-server stop-server
-             nrepl-port start-nrepl dashboard]
+             nrepl-port start-nrepl dashboard now-ms random-hex]
       :or {port 8080 api-key "" dashboard false
            run-server adapter/run-server
            stop-server adapter/stop-server
-           start-nrepl start-nrepl!}}]
+           start-nrepl start-nrepl!
+           now-ms system-now-ms
+           random-hex id/random-hex}}]
   (when @system
     (throw (ex-info "system already started" {})))
   ;; 1. Token store
@@ -55,10 +59,11 @@
       (throw (ex-info (str "Not authenticated — run `jolt run login` first. Path: " auth-path)
                       {})))
     ;; Each start owns an isolated pool and an explicit handler dependency map.
-    (let [session-id (random-session-id)
+    (let [session-id (random-session-id random-hex)
           pool (atom {})
           runtime {:store store :pool pool :session-id session-id
-                   :api-key api-key :port port :started-at (System/currentTimeMillis)
+                   :api-key api-key :port port :started-at (now-ms)
+                   :now-ms now-ms :random-hex random-hex
                    :requests (atom 0) :dashboard-enabled dashboard}
           handler (proxy/make-handler runtime)]
       (let [started (atom {})]

@@ -97,8 +97,8 @@
    :headers {"Content-Type" "application/json"}
    :body (json/write-str {:status "ok"})})
 
-(defn models [_req]
-  (let [now (long (/ (System/currentTimeMillis) 1000))
+(defn models [runtime _req]
+  (let [now (long (/ ((or (:now-ms runtime) #(System/currentTimeMillis))) 1000))
         data (vec (map (fn [id] {:id id :object "model"
                                  :created now :owned_by "openai-codex"})
                        model-ids))]
@@ -149,7 +149,7 @@
           (let [ch (async/chan)]
             (async/thread
               (try
-                (let [meta (collect/stream-chat (:read src) model ch)]
+                (let [meta (collect/stream-chat (:read src) model ch runtime)]
                   (try ((:finalize src) meta) (catch Throwable _ nil)))
                 (catch Throwable e
                   (sse/send! ch {:event "message"
@@ -163,7 +163,7 @@
              :headers {"Content-Type" "text/event-stream"
                        "Cache-Control" "no-cache" "X-Accel-Buffering" "no"}
              :body ch})
-          (let [[response meta] (try (collect/collect-chat (:read src) model)
+          (let [[response meta] (try (collect/collect-chat (:read src) model runtime)
                                      (catch Throwable e
                                        ((:finalize src) {:completed false})
                                        (throw e)))]
@@ -222,7 +222,7 @@
                  :response (fn [_] (health))}
                 {:path "/v1/models"
                  :method :get
-                 :response #(require-api-key runtime % models)}
+                 :response #(require-api-key runtime % (partial models runtime))}
                 {:path "/v1/chat/completions"
                  :method :post
                  :response (fn [req]

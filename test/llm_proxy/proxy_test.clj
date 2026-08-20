@@ -23,3 +23,10 @@
         request {:request-method :get :uri "/v1/models" :headers {}}]
     (is (= 200 (:status (open request))))
     (is (= 401 (:status (guarded request))))))
+
+(deftest model-timestamps-use-runtime-clock
+  (let [handler (proxy/make-handler {:api-key "" :session-id "one"
+                                     :now-ms (constantly 123000)})
+        response (handler {:request-method :get :uri "/v1/models" :headers {}})
+        body (clojure.data.json/read-str (:body response) :key-fn keyword)]
+    (is (= 123 (get-in body [:data 0 :created])))))
