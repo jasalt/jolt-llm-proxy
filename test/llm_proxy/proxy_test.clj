@@ -1,5 +1,6 @@
 (ns llm-proxy.proxy-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.string :as str]
             [clojure.data.json :as json]
             [llm-proxy.error :as error]
             [llm-proxy.proxy :as proxy]
@@ -65,4 +66,49 @@
       (is (= :auth
              (try (proxy/open-event-source runtime request "client" false)
                   nil
-                  (catch Throwable e (:type (ex-data e))))))))))
+                  (catch Throwable e (:type (ex-data e)))))))))
+
+(deftest error-logging-is-classified-and-secret-free
+  (let [secret-values ["Bearer token-123" "session-456"
+                       "Authorization: Bearer token-123" "prompt: private text"
+                       "raw upstream body"]
+        captured (atom [])
+        failure (ex-info (str/join " | " secret-values)
+                         {:type :upstream-http :status 500
+                          :authorization "Bearer token-123"
+                          :session-id "session-456"
+                          :prompt "private text"
+                          :body "raw upstream body"})]
+    (binding [error/*emit!* (fn [level data] (swap! captured conj [level data]))]
+      (error/log! :error :request-failed failure
+                  {:method :post :uri "/v1/responses"}))
+    (is (= [[:error {:event :request-failed
+                     :error-category :upstream-http
+                     :error-code "upstream_error"
+                     :status 500
+                     :method :post
+                     :uri "/v1/responses"}]]
+           @captured))
+    (let [rendered (pr-str @captured)]
+      (doseq [secret secret-values]
+        (is (not (.contains rendered secret)))))))
+
+(deftest handler-maps-classified-and-unknown-failures
+  (let [runtime {:api-key "" :session-id "default" :pool {}}
+        request {:request-method :post :uri "/v1/responses"
+                 :headers {} :body "{\"model\":\"gpt-5.4\",\"input\":\"hello\"}"}]
+    (doseq [[failure expected-status expected-code]
+            [[(ex-info "upstream raw body" {:type :upstream-http :status 429})
+              502 "upstream_error"]
+             [(ex-info "Bearer expired-token" {:type :auth})
+              401 "authentication_error"]
+             [(ex-info "upstream timeout" {:type :timeout})
+              504 "upstream_timeout"]
+             [(Exception. "internal token=private")
+              500 "internal_error"]]]
+      (with-redefs [transport-sse/source (fn [& _] (throw failure))]
+        (let [response ((proxy/make-handler runtime) request)
+              body (json/read-str (:body response) :key-fn keyword)]
+          (is (= expected-status (:status response)))
+          (is (= expected-code (get-in body [:error :code])))
+          (is (not (.contains (:body response) (.getMessage failure))))))))))

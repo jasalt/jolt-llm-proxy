@@ -53,6 +53,15 @@
 (defn stream-message [error]
   (:message (public-details error)))
 
+(def ^:dynamic *emit!*
+  "Narrow log sink seam. It makes redaction assertions independent of a logging
+  backend while production continues to use clojure.tools.logging."
+  (fn [level data]
+    (case level
+      :warn (log/warn data)
+      :error (log/error data)
+      (log/info data))))
+
 (defn log! [level event error context]
   "Log only classification and explicitly selected non-secret context. Never
   pass the Throwable itself or its message/body to the logging backend."
@@ -62,7 +71,4 @@
                      :error-code (:code details)}
                     (select-keys (ex-data error) [:status])
                     context)]
-    (case level
-      :warn (log/warn data)
-      :error (log/error data)
-      (log/info data))))
+    (*emit!* level data)))
