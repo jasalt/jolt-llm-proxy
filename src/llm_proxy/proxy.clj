@@ -48,8 +48,29 @@
                                   :type "invalid_request_error"
                                   :code code}})})
 
+(defn- invalid-field-paths
+  "Return bounded schema paths only, never rejected values or request text."
+  [explanation]
+  (->> (:errors explanation)
+       (keep (fn [problem]
+               (let [path (:in problem)]
+                 (when (vector? path)
+                   (str/join "." (map str path))))))
+       distinct
+       (take 16)
+       vec))
+
 (defn- input-error [exception]
-  (ex-info "invalid client request" {:type :input} exception))
+  "Wrap a rejected client request with diagnostics that are safe to log.
+  Malli's explanation contains submitted values, so retain only field paths.
+  Translation failures intentionally expose no exception message."
+  (let [explanation (:malli/explain (ex-data exception))
+        fields (when explanation (invalid-field-paths explanation))]
+    (ex-info "invalid client request"
+             (cond-> {:type :input
+                      :input-reason (if explanation :schema-validation :translation)}
+               (seq fields) (assoc :invalid-fields fields))
+             exception)))
 
 (defn normalize-session-id
   "Validate and clamp a client session/cache identifier before it becomes a
@@ -141,7 +162,10 @@
         parsed (try (tr/chat-to-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
-      (error/response (input-error (:error parsed)))
+      (let [failure (input-error (:error parsed))]
+        (error/log! :warn :invalid-client-request failure
+                    {:method (:request-method req) :uri (:uri req)})
+        (error/response failure))
       (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)
@@ -182,7 +206,10 @@
         parsed (try (tr/prepare-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
-      (error/response (input-error (:error parsed)))
+      (let [failure (input-error (:error parsed))]
+        (error/log! :warn :invalid-client-request failure
+                    {:method (:request-method req) :uri (:uri req)})
+        (error/response failure))
       (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)

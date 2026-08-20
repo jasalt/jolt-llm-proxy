@@ -68,6 +68,27 @@
                   nil
                   (catch Throwable e (:type (ex-data e)))))))))
 
+(deftest rejected-input-logging-keeps-only-safe-schema-paths
+  (let [captured (atom [])
+        runtime {:api-key "" :session-id "default" :pool {}}
+        request {:request-method :post :uri "/v1/chat/completions"
+                 :headers {}
+                 :body "{\"model\":\"m\",\"messages\":[{\"role\":\"user\"}],\"stream\":\"yes\"}"}]
+    (binding [error/*emit!* (fn [level data] (swap! captured conj [level data]))]
+      (let [response ((proxy/make-handler runtime) request)]
+        (is (= 400 (:status response)))))
+    (is (= [[:warn {:event :invalid-client-request
+                    :error-category :input
+                    :error-code "invalid_request"
+                    :input-reason :schema-validation
+                    :invalid-fields ["stream"]
+                    :method :post
+                    :uri "/v1/chat/completions"}]]
+           @captured))
+    (let [rendered (pr-str @captured)]
+      (is (not (.contains rendered "\"model\":\"m\"")))
+      (is (not (.contains rendered "\"stream\":\"yes\""))))))
+
 (deftest error-logging-is-classified-and-secret-free
   (let [secret-values ["Bearer token-123" "session-456"
                        "Authorization: Bearer token-123" "prompt: private text"

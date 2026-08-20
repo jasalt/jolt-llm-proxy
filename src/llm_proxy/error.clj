@@ -69,6 +69,9 @@
         data (merge {:event event
                      :error-category (category error)
                      :error-code (:code details)}
-                    (select-keys (ex-data error) [:status])
+                    ;; These input diagnostics are constructed by the proxy
+                    ;; from Malli paths only; never log exception messages,
+                    ;; explanations, request bodies, headers, or values.
+                    (select-keys (ex-data error) [:status :input-reason :invalid-fields])
                     context)]
     (*emit!* level data)))
