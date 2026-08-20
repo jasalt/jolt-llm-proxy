@@ -8,7 +8,6 @@
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
             [clojure.core.async :as async]
-            [clojure.tools.logging :as log]
             [ring-chez.sse :as sse]
             [ruuter.core :as ruuter]
             [codex.collect :as collect]
@@ -16,6 +15,7 @@
             [llm-proxy.transport.sse :as transport-sse]
             [llm-proxy.transport.ws :as transport-ws]
             [llm-proxy.dashboard :as dashboard]
+            [llm-proxy.error :as error]
             [llm-proxy.id :as id]
             [llm-proxy.time :as time]))
 
@@ -47,6 +47,9 @@
    :body (json/write-str {:error {:message message
                                   :type "invalid_request_error"
                                   :code code}})})
+
+(defn- input-error [exception]
+  (ex-info "invalid client request" {:type :input} exception))
 
 (defn normalize-session-id
   "Validate and clamp a client session/cache identifier before it becomes a
@@ -120,11 +123,13 @@
     (if (and pool (not= session-id "") (not= session-id default-session))
       (try
         (transport-ws/source runtime request session-id for-chat)
-        (catch Throwable error
-          (log/warn {:event :ws-fallback
-                     :session-hash (when session-id (id/short-hash session-id))
-                     :error-type (:type (ex-data error))})
-          (sse-source runtime request session-id)))
+        (catch Throwable ws-error
+          (if (error/ws-fallback? ws-error)
+            (do
+              (error/log! :warn :ws-fallback ws-error
+                          {:session-hash (when session-id (id/short-hash session-id))})
+              (sse-source runtime request session-id))
+            (throw ws-error))))
       (sse-source runtime request session-id))))
 
 ;; ---------------------------------------------------------------------------
@@ -136,12 +141,11 @@
         parsed (try (tr/chat-to-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
-      (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
+      (error/response (input-error (:error parsed)))
       (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)
-          (write-openai-error 400 "invalid_session_id"
-                              (.getMessage ^Throwable (:error session-result)))
+          (error/response (input-error (:error session-result)))
           (let [[request model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
@@ -155,8 +159,8 @@
                 (catch Throwable e
                   (sse/send! ch {:event "message"
                                   :data (json/write-str
-                                          {:error {:message (.getMessage ^Throwable e)
-                                                   :type "upstream_error"
+                                          {:error {:message (error/stream-message e)
+                                                   :type "api_error"
                                                    :code "upstream_error"}})})
                   (sse/send! ch {:event "message" :data "[DONE]"})
                   (async/close! ch))))
@@ -178,12 +182,11 @@
         parsed (try (tr/prepare-responses raw)
                     (catch Throwable e {:error e}))]
     (if (contains? parsed :error)
-      (write-openai-error 400 "invalid_request" (.getMessage ^Throwable (:error parsed)))
+      (error/response (input-error (:error parsed)))
       (let [session-result (try (resolve-session-id runtime req)
                                 (catch Throwable e {:error e}))]
         (if (map? session-result)
-          (write-openai-error 400 "invalid_session_id"
-                              (.getMessage ^Throwable (:error session-result)))
+          (error/response (input-error (:error session-result)))
           (let [[request _model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
@@ -195,7 +198,7 @@
                 (let [meta (collect/stream-responses (:read src) ch)]
                   (try ((:finalize src) meta) (catch Throwable _ nil)))
                 (catch Throwable e
-                  (collect/send-stream-error ch (.getMessage ^Throwable e))
+                  (collect/send-stream-error ch (error/stream-message e))
                   (async/close! ch))))
             {:status 200
              :headers {"Content-Type" "text/event-stream"
@@ -263,4 +266,9 @@
       ;; than proxied client requests; keep them out of the API request metric.
       (when-not (str/starts-with? (or (:uri req) "") "/_llm-proxy")
         (swap! (:requests runtime) inc))
-      (ruuter/route routes req))))
+      (try
+        (ruuter/route routes req)
+        (catch Throwable request-error
+          (error/log! :error :request-failed request-error
+                      {:method (:request-method req) :uri (:uri req)})
+          (error/response request-error))))))

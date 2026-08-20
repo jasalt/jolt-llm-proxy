@@ -28,33 +28,41 @@
   (let [store (:store runtime)
         pool (:pool runtime)
         header-builder (fn [] (auth/token store))
-        [acquisition request-body used-delta?]
-        (acquire-request pool full-body session-id header-builder)]
+        acquisition (atom nil)]
     (try
-      (when used-delta?
-        (log/debug {:event :ws-delta-continuation
-                    :session-hash (when session-id (id/short-hash session-id))}))
-      (ws/write-text (:conn acquisition)
-                     (json/write-str (assoc request-body :type "response.create")))
-      {:read
-       (fn [emit]
-         (ws/read-until-terminal
-           (:conn acquisition)
-           (fn [event]
-             (emit {:name (:type event) :data (:data event)}))))
+      (let [[owned request-body used-delta?]
+            (acquire-request pool full-body session-id header-builder)
+            _ (reset! acquisition owned)]
+        (when used-delta?
+          (log/debug {:event :ws-delta-continuation
+                      :session-hash (when session-id (id/short-hash session-id))}))
+        (ws/write-text (:conn owned)
+                       (json/write-str (assoc request-body :type "response.create")))
+        {:read
+         (fn [emit]
+           (ws/read-until-terminal
+             (:conn owned)
+             (fn [event]
+               (emit {:name (:type event) :data (:data event)}))))
 
-       :finalize
-       (fn [meta]
-         (let [keep? (and (:completed meta) (not= (:response-id meta) ""))]
-           (when keep?
-             (ws/set-continuation!
-               (:conn acquisition)
-               {:last-request-body full-body
-                :last-response-id (:response-id meta)
-                :last-response-items
-                (continuation/response-output-to-input-items
-                  (:items meta) for-chat)}))
-           ((:release acquisition) keep?)))}
+         :finalize
+         (fn [meta]
+           (let [keep? (and (:completed meta) (not= (:response-id meta) ""))]
+             (when keep?
+               (ws/set-continuation!
+                 (:conn owned)
+                 {:last-request-body full-body
+                  :last-response-id (:response-id meta)
+                  :last-response-items
+                  (continuation/response-output-to-input-items
+                    (:items meta) for-chat)}))
+             ((:release owned) keep?)))})
       (catch Throwable error
-        ((:release acquisition) false)
-        (throw error)))))
+        (when-let [owned @acquisition]
+          ((:release owned) false))
+        ;; The proxy can safely retry only failures in WS establishment or its
+        ;; initial write. Mark them explicitly; do not make every exception a
+        ;; reason to silently change transports.
+        (throw (ex-info "websocket transport setup failed"
+                        {:type :ws-transport}
+                        error))))))

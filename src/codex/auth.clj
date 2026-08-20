@@ -151,11 +151,11 @@
                  :throw-exceptions false})]
     (when-not (= 200 (:status resp))
       (throw (ex-info "token exchange failed"
-                      {:status (:status resp) :body (:body resp)})))
+                      {:type :auth :status (:status resp)})))
     (let [body (json/read-str (:body resp) :key-fn keyword)
           access (:access_token body)]
       (when (empty? access)
-        (throw (ex-info "token response is missing access_token" {})))
+        (throw (ex-info "token response is missing access_token" {:type :auth})))
       (let [refresh (or (:refresh_token body) old-refresh)
             expires-in (:expires_in body)
             expires-at (if (and expires-in (pos? expires-in))
@@ -206,11 +206,12 @@
      (locking lk
        (let [cred @store]
          (when (nil? (:access_token cred))
-           (throw (ex-info "not logged in; run login" {})))
+           (throw (ex-info "not logged in; run login" {:type :auth})))
          (if (or force (>= (+ ((:now-ms cred)) refresh-margin-ms)
                            (:expires_at cred)))
            (if (nil? (:refresh_token cred))
-             (throw (ex-info "access token expired and no refresh token available; login again" {}))
+             (throw (ex-info "access token expired and no refresh token available; login again"
+                             {:type :auth}))
              (let [newcred (refresh-token!
                             (select-keys cred [:access_token :refresh_token])
                             (select-keys cred [:now-ms :http-post]))
