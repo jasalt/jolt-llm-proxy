@@ -57,5 +57,5 @@ data stays in local `ex-data` and is not serialized to clients.
 
 ## Evidence
 
-`test/codex/schema_test.clj` covers project schemas, open/closed map behavior,
+`test/llm_proxy/schema_test.clj` covers project schemas, open/closed map behavior,
 structured explanations, and the broader useful Malli vocabulary.

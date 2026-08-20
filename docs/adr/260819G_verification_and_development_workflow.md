@@ -43,5 +43,5 @@ operate on data.
   handshake remains under `examples/` as an integration recipe.
 - JVM-only runners, coverage agents, and static-analysis assumptions are not
   treated as authoritative for Jolt.
-- The suite reached 28 tests and 96 assertions after adding Malli validation
-  coverage.
+- The suite currently has 59 tests and 239 assertions, including deterministic
+  WebSocket frame/handshake, classified-error/redaction, and dashboard coverage.

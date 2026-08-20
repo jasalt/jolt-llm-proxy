@@ -1,7 +1,7 @@
 # 260819I — Propose an on-demand operator TUI attachment model
 
 - **Date:** 2026-08-19
-- **Status:** Proposed — no implementation yet
+- **Status:** Proposed — inspection boundary implemented; no TUI client yet
 
 ## Context
 
@@ -34,7 +34,7 @@ Running a Glimmer TUI *inside* the proxy process is not an attachment solution.
 absent or unrelated to the operator's terminal for a daemon. Evaluating it
 through nREPL would draw at the server, not at the attached client.
 
-## Proposed decision
+## Proposed TUI decision
 
 If implemented, provide an **external, short-lived TUI client** that owns the
 operator's terminal and reads a deliberately narrow inspection API over the
@@ -52,14 +52,14 @@ operator: jolt -M:tui -m llm-proxy.tui attach
 
 ### Inspection boundary
 
-Introduce a public, dependency-free function such as:
+The implemented public function:
 
 ```clojure
-(llm-proxy.inspect/snapshot)
+(llm-proxy.inspect/snapshot runtime)
 ```
 
-It must produce a small immutable, serialization-safe snapshot rather than
-exposing `@llm-proxy.core/system` directly. An initial shape may include:
+produces a small immutable, serialization-safe snapshot rather than exposing
+`@llm-proxy.core/system` directly. Its current shape includes:
 
 ```clojure
 {:started-at ...
@@ -99,11 +99,12 @@ use the existing short hash rather than its raw value.
 
 ### Metrics scope
 
-The first view may derive current pool state from the runtime-owned pool atom.
-Cumulative request counts, SSE-fallback counts, token-refresh counts, upstream
-failure counts, and latency distributions are not currently available and
-should be added only as explicit runtime-owned counters if a future view
-requires them. Do not infer history from socket/connection objects.
+The implemented snapshot derives current pool state from the runtime-owned pool
+atom and exposes the cumulative proxy request count. SSE-fallback counts,
+token-refresh counts, upstream failure counts, and latency distributions are
+not currently available and should be added only as explicit runtime-owned
+counters if a future view requires them. Do not infer history from
+socket/connection objects.
 
 ## Security and operational constraints
 

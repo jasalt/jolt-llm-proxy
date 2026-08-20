@@ -162,7 +162,10 @@ client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ llm-proxy.
 - **`codex.collect`** — event collectors that reduce upstream events into
   OpenAI-shaped output (chat + responses, streaming and non-streaming).
 - **`llm-proxy.proxy`** — Ring boundary: routes, API-key guard, `prompt_cache_key`,
-  transport selection, endpoint handlers. **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
+  transport selection, endpoint handlers.
+- **`llm-proxy.error`** — classified, redacted public error responses and
+  structured logging; only WebSocket setup/initial-write failures use SSE fallback.
+  **Inbound Ring request/response maps are plain Clojure PMaps** (ring-chez
   `request->ring` builds them with `{}`/`assoc`): use `(:headers req)`,
   `get-in`, `assoc` normally — do **not** use `jolt.host/ref-get` there (it
   returns `nil` on a PMap). The **outbound `jolt.http.tls` stream** is the
@@ -214,8 +217,6 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
   Clojure/Jolt convergence observations.
 - [`docs/adr/`](./docs/adr/) — accepted architectural decisions and completed
   implementation progress.
-- [`260819-review.md`](./docs/260819-review.md) — current architecture review and
-  upcoming work.
 
 The two most dangerous gotchas: **`jolt.host/tagged-table` does not implement
 `IFn`**, so `(:write st)` on the outbound TLS stream returns `nil` silently —

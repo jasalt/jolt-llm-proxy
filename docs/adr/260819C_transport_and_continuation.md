@@ -29,17 +29,20 @@ Both transports expose the same small map interface:
   output, checks conversation prefixes, and returns either a delta request or
   the unchanged full request.
 
-A WebSocket setup failure releases its acquisition before the Ring layer may
-fall back to SSE. A successful terminal result alone preserves the connection
-and continuation state.
+An unclassified WebSocket acquisition or initial-write failure releases its
+acquisition, is classified as `:ws-transport`, and may fall back to SSE. Already
+classified failures (such as auth failures) propagate without changing
+transport. A successful terminal result alone preserves the connection and
+continuation state.
 
 The pool is capped at 128 cached sessions, uses idle LRU eviction, a five-minute
 idle TTL, and a 55-minute maximum connection age. Busy sessions are never
 shared; capacity pressure uses an uncached one-off connection rather than
 unbounded state growth.
 
-WebSocket parsing enforces upgrade-header, frame, control-frame, fragmentation,
-and 64 MiB aggregate message limits.
+WebSocket parsing enforces an HTTP `101` upgrade status, a matching
+case-insensitive `Sec-WebSocket-Accept` header, handshake/frame/control-frame/
+fragmentation limits, and a 64 MiB aggregate message limit.
 
 ## Consequences
 

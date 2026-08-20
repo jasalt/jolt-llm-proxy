@@ -40,6 +40,6 @@ Mount while the resource graph remains this small.
 
 ## Evidence
 
-The lifecycle behavior is covered by `test/codex/core_test.clj`, including
+The lifecycle behavior is covered by `test/llm_proxy/core_test.clj`, including
 explicit server options, cleanup after failed startup, isolated configuration,
 and idempotent stop behavior.

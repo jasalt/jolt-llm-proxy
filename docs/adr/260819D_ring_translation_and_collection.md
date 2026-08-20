@@ -26,6 +26,8 @@ Responsibilities are:
 
 - `llm-proxy.proxy`: exact Ring routes, API-key guard, session normalization,
   prompt-cache-key application, transport selection, and HTTP response maps;
+- `llm-proxy.error`: classified, redacted OpenAI-shaped error mapping and
+  structured logging with explicitly selected safe context;
 - `codex.translate`: Chat-to-Responses transformation, Responses normalization,
   defaults, recognized-field handling, and continuation-compatible input shape;
 - `codex.collect`: reduce common upstream events into Chat or Responses output,
@@ -53,6 +55,7 @@ requirement beyond the two transport maps.
 
 ## Evidence
 
-The extraction reduced `llm-proxy.proxy` from roughly 544 lines to about 230 lines.
 Replay tests live in `test/codex/collect_test.clj`; transport parser tests live
-in `test/codex/transport_sse_test.clj`.
+in `test/llm_proxy/transport_sse_test.clj`. Error classification, redaction,
+and narrow WebSocket-to-SSE fallback behavior are covered by
+`test/llm_proxy/proxy_test.clj`.

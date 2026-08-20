@@ -23,7 +23,8 @@ Use Jolt as the runtime and keep platform-specific behavior at narrow edges:
 - `jolt.ffi` exposes the small POSIX `chmod` surface required by credential
   storage;
 - `clojure.data.json` is the JSON representation boundary;
-- dependencies are pinned to exact Git commits.
+- Git dependencies are pinned to exact commits; Maven dependencies are pinned
+  to explicit versions.
 
 Ring requests, HTTP responses, and decoded JSON are persistent Clojure maps.
 The outbound TLS stream is a Jolt tagged-table and is accessed only through

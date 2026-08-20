@@ -7,13 +7,13 @@
 
 The Jolt Glimmer/Datastar example demonstrates a server-driven browser UI:
 
-- a server-side Glimmer reactive atom is the rendered-state source;
-- `jolt.datastar.core/wrap-datastar` detects a Datastar SSE request, subscribes
-  it to state changes, and emits `datastar-patch-elements` SSE events;
 - a browser-side vendored Datastar bundle patches a selected HTML fragment
   without a page reload;
-- ordinary action requests can patch browser signals, while SSE carries
-  subsequent rendered-fragment updates.
+- the implementation uses `ring-chez.sse` directly: an initial event plus a
+  watch on the runtime request counter and a one-second refresh loop emit
+  `datastar-patch-elements` events;
+- no server-side Glimmer atom, `jolt.datastar.core` wrapper, or browser actions
+  are used.
 
 The proxy already uses Ring Chez and SSE, but its existing SSE is an **outbound
 Codex transport** and its public inbound endpoints are OpenAI-compatible API
@@ -32,11 +32,10 @@ operator view than a terminal TUI, with automatic refresh over SSE. It must not
 turn the OpenAI API proxy into a general browser application, expose secrets,
 or weaken the existing local-only threat model.
 
-## Proposed decision
+## Decision
 
-If implemented, add an explicitly enabled, **read-only operator dashboard**
-using Datastar SSE and the same redacted inspection model proposed by ADR
-260819I.
+Add an explicitly enabled, **read-only operator dashboard** using Datastar SSE
+and the redacted inspection model now implemented by `llm-proxy.inspect`.
 
 ```text
 proxy runtime/statistics atom
@@ -58,15 +57,14 @@ It is a second optional operator interface over HTTP/SSE.
 - Reserve a non-OpenAI path prefix such as `/_llm-proxy/` for the page, static
   Datastar asset, and its SSE subscription. Do not place an administrative UI
   at `/v1/*`.
-- Keep dashboard code in a separate namespace such as
-  `llm-proxy.dashboard.datastar`, distinct from the outbound
+- Keep dashboard code in `llm-proxy.dashboard`, distinct from the outbound
   `llm-proxy.transport.sse` namespace.
 - Use the existing Ruuter route table to mount the optional routes; the
   Datastar wrapper should wrap only the dashboard branch or be demonstrated not
   to alter OpenAI/SSE streaming route semantics.
-- Make Glimmer, Datastar, Hiccup, resources, and ncurses-free browser assets
-  optional dependencies/source roots or a dedicated build profile. A normal
-  proxy deployment and normal `serve` must not require them.
+- Keep the dashboard dependency-free on the server: it uses the existing Ring
+  SSE primitives and string rendering. The vendored browser asset is embedded
+  with `resources/`; normal `serve` does not install dashboard routes.
 - Vendor a fixed, reviewed Datastar browser bundle in project resources and
   embed it only in a dashboard-enabled standalone build. Do not load a CDN
   script at operator-page runtime.
@@ -75,16 +73,16 @@ It is a second optional operator interface over HTTP/SSE.
 
 - The proxy lifecycle/runtime remains the authoritative owner of state.
   Do not replace its system map or WebSocket pool with UI-owned ratoms.
-- Add explicit runtime-owned, bounded statistics only when needed: request and
-  error totals, SSE fallback count, token-refresh outcomes, current pool
-  summary, and process start time are suitable examples.
+- The initial runtime-owned statistics are request count, current pool summary,
+  process start time, listener configuration, and feature/authentication state.
+  Error totals, SSE fallback count, token-refresh outcomes, and latency metrics
+  remain future additions.
 - Project those statistics through a pure redaction function into an immutable
   snapshot. A Glimmer ratom may hold that projection solely to trigger UI
   renders.
-- Coalesce updates and rate-limit rendering (the example uses a 15 ms wrapper
-  rate limit; an operator dashboard should use a deliberately modest interval,
-  such as 250 ms to one second). Per-tab SSE channels must be bounded and
-  subscription/watch cleanup must occur when the browser disconnects.
+- Use bounded per-tab SSE channels. The implementation emits an initial patch,
+  watches request-count changes, and refreshes uptime once per second; a failed
+  channel offer removes the watch and closes the channel.
 - Render a compact overview first: process uptime, listener state,
   authenticated/not-authenticated state, API-key-enabled boolean, request/error
   counters, and pooled/busy/idle WebSocket counts. Avoid unbounded tables;
@@ -172,8 +170,10 @@ SHA.
    dependencies or resources.
 2. Dashboard routes are absent unless explicitly enabled and cannot shadow
    `/v1/*` API routes.
-3. Tests prove a dashboard SSE subscription receives a redacted fragment update
-   after a statistics change and is released after client disconnect.
+3. Tests prove a dashboard SSE subscription receives a redacted initial
+   fragment and route traffic is excluded from the request metric. The
+   implementation removes its watcher when a bounded channel can no longer
+   accept an update.
 4. Tests prove no snapshot, rendered HTML, event, or error response contains
    tokens, API keys, raw session IDs, prompts, or upstream body data.
 5. The dashboard’s optional wrapper does not change existing Chat/Responses SSE

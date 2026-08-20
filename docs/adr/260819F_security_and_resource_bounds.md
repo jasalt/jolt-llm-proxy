@@ -29,7 +29,10 @@ Adopt the following security boundary:
 - persist only credential fields in an owner-only directory and atomic
   owner-only credential file (`0700` directory, `0600` file);
 - distinguish a missing credential file from parse, permission, write, rename,
-  and delete failures.
+  and delete failures;
+- classify boundary failures into stable public input/auth/upstream/timeout/
+  internal responses, redact exception messages and bodies from clients, and
+  log only classification plus explicitly selected safe context.
 
 The proxy is not presented as a public multi-user service. External access must
 be placed behind a separately authenticated TLS reverse proxy and changes the
@@ -42,6 +45,7 @@ threat model.
 - Client input cannot grow retained pool state without fixed bounds.
 - Credential corruption and persistence failures are visible rather than
   silently interpreted as logout.
-- Startup logs no longer disclose reusable secrets or raw routing identifiers.
+- Startup and failure logs no longer disclose reusable secrets or raw routing
+  identifiers; public error responses do not expose raw exception messages.
 - The private upstream API remains an operational compatibility risk and may
   change independently of this adapter.
