@@ -12,6 +12,7 @@
             [codex.auth :as auth]
             [codex.ws :as ws]
             [llm-proxy.proxy :as proxy]
+            [llm-proxy.utf8-request :as utf8-request]
             [codex.cli :as cli]
             [llm-proxy.id :as id]
             [llm-proxy.time :as time]))
@@ -69,6 +70,10 @@
                    :now-ms now-ms :random-hex random-hex
                    :requests (atom 0) :dashboard-enabled dashboard}
           handler (proxy/make-handler runtime)]
+      ;; ring-chez-adapter currently compares decoded character counts with
+      ;; byte-based Content-Length. Install byte-correct framing before its
+      ;; worker threads start so non-ASCII prompts and tool schemas reach Ring.
+      (utf8-request/install!)
       (let [started (atom {})]
         (try
           (let [srv (run-server handler
