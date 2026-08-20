@@ -163,6 +163,32 @@ this narrower surface.
 `_`→`/`, and restore padding before calling the ordinary decoder. See
 `JOLT-GOTCHAS.md` §6.
 
+### JI-6: `ProcessBuilder.inheritIO` is missing
+
+**Upstream:** <https://github.com/jolt-lang/jolt>
+
+**Status:** Confirmed on Jolt v0.7.13 and the latest release, v0.7.17, while
+diagnosing terminal input.
+
+```console
+$ jolt -e '(.. (ProcessBuilder. ["true"]) inheritIO start waitFor)'
+Unhandled exception: No matching field found: inheritIO for class java.lang.ProcessBuilder
+
+$ bb -e '(println (.. (ProcessBuilder. ["true"]) inheritIO start waitFor))'
+0
+```
+
+Jolt implements `redirectInput`, `redirectOutput`, and `redirectError`, so the
+portable workaround is to set each required stream explicitly to
+`ProcessBuilder$Redirect/INHERIT` before `.start`.
+
+**Expected:** `ProcessBuilder.inheritIO()` should redirect all three standard
+streams to the parent and return the builder, matching the JVM API.
+
+**Impact:** Ported process-launch code using the standard convenience method
+fails at runtime. This project only needs inherited stdin for `stty`, so it uses
+`.redirectInput` as a narrow workaround.
+
 ## Valid but low-priority documentation contribution
 
 ### JI-2: make the raw TLS stream accessor explicit in `http-client`

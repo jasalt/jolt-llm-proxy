@@ -2,6 +2,7 @@
   (:require [clojure.test :as t]
             [codex.auth-test]
             [codex.collect-test]
+            [codex.cli-test]
             [llm-proxy.core-test]
             [codex.continuation-test]
             [llm-proxy.proxy-test]
@@ -16,6 +17,7 @@
   (let [{:keys [fail error]}
         (t/run-tests 'codex.auth-test
                      'codex.collect-test
+                     'codex.cli-test
                      'llm-proxy.core-test
                      'codex.continuation-test
                      'llm-proxy.proxy-test

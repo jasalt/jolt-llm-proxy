@@ -1,0 +1,45 @@
+#!/usr/bin/expect -f
+# Verify the real Jolt CLI receives a CR-terminated browser-login selection.
+# Run from any directory: expect test/e2e/login.expect
+
+set timeout 120
+set root [file normalize [file join [file dirname [info script]] .. ..]]
+set auth_file [file join /tmp "jolt-llm-proxy-login-[pid].json"]
+set env(JOLT_LLM_PROXY_AUTH_FILE) $auth_file
+
+proc fail {message} {
+  global auth_file
+  catch {exec rm -f $auth_file}
+  puts stderr $message
+  exit 1
+}
+
+cd $root
+# Reproduce the broken sandbox tty: canonical input with CR-to-LF translation
+# disabled. Enter is echoed as ^M and does not complete a line until the CLI
+# restores `icrnl`.
+spawn -noecho sh -c {stty icanon -icrnl; exec jolt -m llm-proxy.core login}
+expect {
+  "> " {}
+  timeout { fail "did not render login prompt" }
+  eof { fail "login exited before rendering its prompt" }
+}
+
+send -- "1\r"
+expect {
+  "Opening your browser for ChatGPT login..." {}
+  timeout { fail "option 1 did not start browser login" }
+  eof { fail "login exited before starting browser login" }
+}
+expect {
+  -re {https://auth\.openai\.com/oauth/authorize\?response_type=code} {}
+  timeout { fail "browser authorization URL was not printed" }
+  eof { fail "login exited before printing the authorization URL" }
+}
+
+# The process now correctly waits for the OAuth callback; end this isolated
+# smoke test rather than waiting for a real browser authorization.
+exec kill -KILL [exp_pid]
+catch {wait}
+catch {exec rm -f $auth_file}
+puts "login browser selection passed"

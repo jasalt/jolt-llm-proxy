@@ -98,10 +98,13 @@ the target Linux/Chez platform (or use Jolt's documented `--target` /
 `--target-pack` cross-compilation options):
 
 ```bash
-# Produces an optimized native executable at target/jolt-llm-proxy.
+# Produces an optimized native executable at target/jolt-llm-proxy taking ~3min.
 # `--direct-link` reduces runtime var indirection for this closed-world binary.
 mkdir -p target
 jolt build -m llm-proxy.core -o target/jolt-llm-proxy --opt --direct-link
+
+# Faster uniptimized development build (takes ~30 sec)
+jolt build -m llm-proxy.core -o target/jolt-llm-proxy --dev
 
 # The executable contains the application and resources; Jolt is not needed
 # to run it after the build.

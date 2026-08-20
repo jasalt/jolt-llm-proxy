@@ -55,12 +55,48 @@
     true
     (catch Throwable _ false)))
 
+(defn read-console-line
+  "Read one console line, accepting either LF or CR as its terminator.
+
+  `read-line` only recognizes LF.  Some terminal/PTY combinations used with
+  Jolt leave stdin in a mode where Enter arrives as CR, so an interactive
+  login selection would otherwise remain unread."
+  [reader]
+  (loop [line ""]
+    (let [ch (.read reader)]
+      (cond
+        (= ch -1) line
+        (or (= ch 10) (= ch 13)) line
+        :else (recur (str line (char ch)))))))
+
+(defn- restore-enter-translation!
+  "Restore the POSIX tty translation from Enter's CR byte to LF.
+
+  A sandbox can start Bash with canonical input but `icrnl` disabled. In that
+  state the kernel echoes Enter as `^M` but does not release the canonical line
+  to this process, so no application-level reader can consume it. Use inherited
+  stdio so `stty` operates on fd 0; opening /dev/tty can be denied in a jail."
+  []
+  (try
+    (let [process (-> (ProcessBuilder. ["stty" "icrnl"])
+                      ;; Jolt v0.7.13 does not implement ProcessBuilder.inheritIO.
+                      ;; Inheriting fd 0 is sufficient for stty's tcsetattr.
+                      (.redirectInput ProcessBuilder$Redirect/INHERIT)
+                      (.start))]
+      (zero? (.waitFor process)))
+    (catch Throwable _ false)))
+
 (defn prompt-choice
-  "Print the prompt, read a trimmed line from stdin."
+  "Print the prompt, then read a trimmed choice from the console."
   [prompt]
+  ;; Complete tty repair before displaying the prompt, otherwise a fast input
+  ;; relay can deliver CR in the small window before `stty` takes effect.
+  (restore-enter-translation!)
   (println prompt)
   (print "> ") (flush)
-  (str/trim (or (read-line) "")))
+  (let [reader (java.io.BufferedReader.
+                 (java.io.InputStreamReader. System/in))]
+    (str/trim (read-console-line reader))))
 
 ;; ---------------------------------------------------------------------------
 ;; Browser login (PKCE + localhost callback server)
@@ -135,6 +171,13 @@
                       "&originator=pi")
         deadline (+ (time/now-ms) (* 5 60 1000))
         outcome (try
+                  ;; Make progress visible even when there is no graphical
+                  ;; session. Previously `auth-url` was constructed but never
+                  ;; opened or printed, which made a successful choice of 1
+                  ;; look like the prompt was still waiting for Enter.
+                  (println "Opening your browser for ChatGPT login...")
+                  (println (str "If it does not open, visit:\n" auth-url))
+                  (open-browser auth-url)
                   (loop []
                     (cond
                       (realized? result) @result
