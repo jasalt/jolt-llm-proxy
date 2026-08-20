@@ -1,6 +1,9 @@
 {:paths ["src" "resources"]
  :jolt/build {:embed ["resources"]}
- :aliases {:test {:extra-paths ["test"]}}
+ :aliases {:test {:extra-paths ["test"]
+                  ;; Kept explicit even though Malli currently brings it transitively:
+                  ;; property tests are an intentional test-suite dependency.
+                  :extra-deps {org.clojure/test.check {:mvn/version "1.1.3"}}}}
  :deps {jolt-lang/ring-chez-adapter
         {:git/url "https://github.com/jolt-lang/ring-chez-adapter"
          :git/sha "665508bbf329bc046fa06bca1ed9cebee257686b"}
@@ -17,6 +20,9 @@
         metosin/malli
         {:git/url "https://github.com/metosin/malli"
          :git/sha "a74e3b45efa30b3bcdb2e997f337c71614eba3c5"}
+        ;; Command tree, option validation/coercion, and generated help.
+        ;; Verified under Jolt; see ADR 260820B.
+        org.babashka/cli {:mvn/version "0.12.86"}
         askonomm/ruuter
         {:git/url "https://git.nmm.ee/asko/ruuter.git"
          :git/tag "v2.1.1"

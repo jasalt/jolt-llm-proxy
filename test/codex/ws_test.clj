@@ -1,5 +1,8 @@
 (ns codex.ws-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [codex.ws :as ws]
             [llm-proxy.id]
             [llm-proxy.time]))
@@ -41,6 +44,41 @@
     (is (= 1234 (llm-proxy.time/now-ms)))
     (is (= "2a2a" (llm-proxy.id/random-hex 2)))
     (is (= "KioqKioqKioqKioqKioqKg==" (ws/handshake-key)))))
+
+(defn- property-passes? [result]
+  (:pass? result))
+
+(deftest generated-frame-round-trips-and-fragmentation-remains-bounded
+  (testing "text frames round-trip through arbitrary chunk boundaries"
+    (is (property-passes?
+         (tc/quick-check
+          40
+          (prop/for-all [payload (gen/vector (gen/choose 0 255) 0 2048)
+                         chunk-size (gen/choose 1 128)]
+            (let [data (byte-array (map unchecked-byte payload))
+                  raw (frame 1 data)
+                  chunks (mapv #(java.util.Arrays/copyOfRange
+                                 raw % (min (+ % chunk-size) (alength raw)))
+                               (range 0 (alength raw) chunk-size))
+                  {:keys [conn]} (conn-from chunks)
+                  message (ws/read-message conn)]
+              (and (= :text (:type message))
+                   (java.util.Arrays/equals data (:data message)))))))))
+  (testing "fragmented messages preserve their aggregate payload"
+    (is (property-passes?
+         (tc/quick-check
+          40
+          (prop/for-all [left (gen/vector (gen/choose 0 255) 0 1024)
+                         right (gen/vector (gen/choose 0 255) 0 1024)]
+            (let [first-part (frame 1 (byte-array (map unchecked-byte left))
+                                    :fin false)
+                  last-part (frame 0 (byte-array (map unchecked-byte right)))
+                  {:keys [conn]} (conn-from [(byte-array
+                                              (concat (seq first-part)
+                                                      (seq last-part)))])
+                  message (ws/read-message conn)]
+              (= (+ (count left) (count right))
+                 (alength (:data message))))))))))
 
 (deftest frame-length-boundaries-and-partial-reads
   (doseq [n [0 1 125 126 65535 65536]]

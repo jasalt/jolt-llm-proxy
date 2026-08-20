@@ -12,8 +12,9 @@
 (def max-tools 128)
 (def max-input-items 1000)
 
-(defn non-empty-string? [value]
-  (and (string? value) (not= value "")))
+(def non-empty-string
+  "A non-empty string with a native Malli generator for property tests."
+  [:string {:min 1}])
 
 (def content
   "A Chat content value accepted by the translator. Content-part maps stay
@@ -44,7 +45,7 @@
 (def chat-request
   "Open, string-keyed `/v1/chat/completions` request shape."
   [:map
-   ["model" [:fn non-empty-string?]]
+   ["model" non-empty-string]
    ["messages" [:vector {:min 1 :max max-messages} chat-message]]
    ["stream" {:optional true} [:maybe boolean?]]
    ["temperature" {:optional true} [:maybe number?]]
@@ -57,7 +58,7 @@
   "Open, string-keyed `/v1/responses` request shape. Unknown top-level fields
   intentionally remain valid and pass through upstream with string keys."
   [:map
-   ["model" [:fn non-empty-string?]]
+   ["model" non-empty-string]
    ["input" [:or :string [:vector {:max max-input-items} :map]]]
    ["stream" {:optional true} [:maybe boolean?]]
    ["tools" {:optional true} tool-list]])

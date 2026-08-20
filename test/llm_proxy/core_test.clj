@@ -43,7 +43,10 @@
     (core/stop!)
     (is (= 1 @stopped))))
 
-(deftest parses-only-the-explicit-nrepl-flag
+(deftest parses-only-the-explicit-serve-options
   (is (false? (core/nrepl-flag? [])))
   (is (true? (core/nrepl-flag? ["--nrepl"])))
-  (is (thrown? Throwable (core/nrepl-flag? ["--unexpected"]))))
+  (is (= {:dashboard true}
+         (core/serve-options ["--dashboard"])))
+  (is (thrown? Throwable (core/serve-options ["--unexpected"])))
+  (is (thrown? Throwable (core/serve-options ["unexpected-argument"]))))

@@ -6,6 +6,7 @@
             [codex.continuation-test]
             [llm-proxy.proxy-test]
             [llm-proxy.schema-test]
+            [llm-proxy.generative-test]
             [codex.translate-test]
             [codex.ws-test]
             [llm-proxy.transport-sse-test]
@@ -19,6 +20,7 @@
                      'codex.continuation-test
                      'llm-proxy.proxy-test
                      'llm-proxy.schema-test
+                     'llm-proxy.generative-test
                      'codex.translate-test
                      'codex.ws-test
                      'llm-proxy.transport-sse-test

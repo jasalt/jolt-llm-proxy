@@ -78,6 +78,39 @@ silently dropping `ex-data`, and should not be bundled into the brepl report.
 If richer nREPL errors are desired, first compare Jolt's response with the nREPL
 protocol/middleware contract and file that independently against Jolt/nREPL.
 
+### JI-5: `test.check` string generators fail under Jolt
+
+**Upstream:** <https://github.com/jolt-lang/jolt>
+
+**Status:** Confirmed in this project on 2026-08-20. `test.check` otherwise
+loads and integer/vector properties execute successfully. Check the Jolt
+version before filing; no upstream tracker search has yet been performed.
+
+With explicit `org.clojure/test.check` 1.1.3 available, run:
+
+```console
+$ jolt -M:test -e '(require (quote [clojure.test.check.generators :as gen])) (println (gen/generate (gen/string-alphanumeric)))'
+Unhandled exception: class clojure.test.check.generators.Generator cannot be cast to class clojure.lang.IFn
+  at ... clojure.test.check.generators/sized (.../generators.cljc:298)
+```
+
+The basic property engine works in the same environment:
+
+```clojure
+(require '[clojure.test.check :as tc]
+         '[clojure.test.check.generators :as gen]
+         '[clojure.test.check.properties :as prop])
+(tc/quick-check 5 (prop/for-all [x gen/int] (= x x)))
+;; => {:result true, :pass? true, ...}
+```
+
+**Expected:** Standard string generators, including `gen/string-alphanumeric`,
+should produce strings as they do on JVM Clojure.
+
+**Impact:** Property tests cannot use standard generated strings. This project
+uses Malli-generated strings where applicable and bounded numeric/vector
+generators plus fixed invalid-string cases until resolved.
+
 ### JI-4: `java.util.Base64` shim lacks URL-safe encoder and decoder
 
 **Upstream:** <https://github.com/jolt-lang/jolt>

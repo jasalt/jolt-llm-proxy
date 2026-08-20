@@ -1,6 +1,7 @@
 (ns llm-proxy.core
   "Server startup, runtime state, and CLI entry point."
   (:require [clojure.string :as str]
+            [babashka.cli :as bcli]
             [clojure.tools.logging :as log]
             [ring-chez.adapter :as adapter]
             [jolt.nrepl :as nrepl]
@@ -127,53 +128,65 @@
   [key fallback]
   (or (System/getenv key) fallback))
 
-(defn- serve-flags
+(def serve-option-spec
+  {:nrepl {:coerce :boolean
+            :desc "Start the loopback development nREPL server"}
+   :dashboard {:coerce :boolean
+               :desc "Enable the loopback read-only operator dashboard"}})
+
+(defn- serve-options
+  "Strictly parse the supported `serve` options for direct unit coverage."
   [args]
-  (cond
-    (empty? args) #{}
-    (every? #{"--nrepl" "--dashboard"} args) (set args)
-    :else (throw (ex-info "Usage: serve [--nrepl] [--dashboard]" {:args args}))))
+  (bcli/parse-opts args {:spec serve-option-spec
+                          :restrict true
+                          :restrict-args true
+                          :no-keyword-opts true}))
 
 (defn- nrepl-flag? [args]
   "True only when the explicit development/debug nREPL flag is present."
-  (contains? (serve-flags args) "--nrepl"))
+  (true? (:nrepl (serve-options args))))
+
+(defn serve-command
+  "Start the proxy from a babashka.cli command dispatch result."
+  [{:keys [opts]}]
+  (let [nrepl? (:nrepl opts)
+        dashboard? (:dashboard opts)
+        addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
+        api-key (env "JOLT_LLM_PROXY_API_KEY" "")
+        ;; ring-chez-adapter is loopback-only; reject misleading hosts.
+        [host port-str] (str/split addr #":" 2)
+        _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
+            (throw (ex-info "JOLT_LLM_PROXY_ADDR must use 127.0.0.1 or localhost"
+                            {:address addr})))
+        port (if port-str (Integer/parseInt port-str) 8080)
+        nrepl-port (when nrepl?
+                     (Integer/parseInt (env "JOLT_NREPL_PORT"
+                                             (str default-nrepl-port))))]
+    (start! :port port :api-key api-key :nrepl-port nrepl-port
+            :dashboard dashboard?)
+    ;; Block until interrupted.
+    (.addShutdownHook (Runtime/getRuntime)
+      (Thread. ^Runnable stop!))
+    @(promise)))
+
+(def command-tree
+  "Extensible command tree. `:restrict` rejects unrecognized command options."
+  {:cmd {"serve" {:fn serve-command
+                   :doc "Start the OpenAI-compatible proxy"
+                   :spec serve-option-spec
+                   :restrict true
+                   :restrict-args true}
+         "login" {:fn (fn [_] (cli/login!))
+                  :doc "Log in to ChatGPT / Codex"}
+         "logout" {:fn (fn [_] (cli/logout!))
+                   :doc "Remove saved credentials"}
+         "usage" {:fn (fn [_] (cli/usage!))
+                  :doc "Show weekly Codex allowance"}
+         "info" {:fn (fn [_] (cli/info!))
+                 :doc "Show saved credential and JWT information"}}})
 
 (defn -main [& args]
-  (let [command (if (seq args) (first args) "serve")
-        command-args (if (seq args) (rest args) [])]
-    (case command
-      "serve"
-      (let [flags (serve-flags command-args)
-            nrepl? (contains? flags "--nrepl")
-            dashboard? (contains? flags "--dashboard")
-            addr    (env "JOLT_LLM_PROXY_ADDR" "127.0.0.1:8080")
-            api-key (env "JOLT_LLM_PROXY_API_KEY" "")
-            ;; ring-chez-adapter is loopback-only; reject misleading hosts.
-            [host port-str] (str/split addr #":" 2)
-            _ (when-not (contains? #{"127.0.0.1" "localhost"} host)
-                (throw (ex-info "JOLT_LLM_PROXY_ADDR must use 127.0.0.1 or localhost"
-                                {:address addr})))
-            port (if port-str (Integer/parseInt port-str) 8080)
-            nrepl-port (when nrepl?
-                         (Integer/parseInt (env "JOLT_NREPL_PORT"
-                                                 (str default-nrepl-port))))]
-        (start! :port port :api-key api-key :nrepl-port nrepl-port
-                :dashboard dashboard?)
-        ;; Block until interrupted.
-        (.addShutdownHook (Runtime/getRuntime)
-          (Thread. ^Runnable stop!))
-        @(promise))
-
-      "login"
-      (cli/login!)
-
-      "logout"
-      (cli/logout!)
-
-      "usage"
-      (cli/usage!)
-
-      "info"
-      (cli/info!)
-
-      (println (str "Unknown command: " command "\nUsage: serve | login | logout | usage | info")))))
+  ;; Preserve the historical no-argument behavior while gaining generated help,
+  ;; command validation, and an extensible option surface.
+  (bcli/dispatch command-tree (if (seq args) args ["serve"])
+                 {:prog "jolt -m llm-proxy.core" :help true}))
