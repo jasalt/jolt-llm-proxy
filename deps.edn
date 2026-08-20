@@ -23,10 +23,6 @@
         ;; Command tree, option validation/coercion, and generated help.
         ;; Verified under Jolt; see ADR 260820B.
         org.babashka/cli {:mvn/version "0.12.86"}
-        askonomm/ruuter
-        {:git/url "https://git.nmm.ee/asko/ruuter.git"
-         :git/tag "v2.1.1"
-         :git/sha "263f868cf19e73ccda7cda6b4d4af1d8fe504749"}
         jolt-lang/nrepl
         {:git/url "https://github.com/jolt-lang/nrepl"
          :git/tag "v0.1.0"

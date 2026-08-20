@@ -34,13 +34,12 @@ Responsibilities are:
   for streaming and nonstreaming clients;
 - `llm-proxy.transport.*`: produce events and own transport cleanup.
 
-Use `askonomm/ruuter` for the Ring route table. Routes remain plain data and
-Ruuter's best-match semantics leave room for future path parameters without
-reintroducing routing conditionals into `llm-proxy.proxy`. Keep API-key
-protection in the route response functions so routing and authorization remain
-separate concerns. Retain maps and functions as the internal event-source
-interface rather than introducing a protocol with no multiple implementation
-requirement beyond the two transport maps.
+Use a small direct method/path dispatcher for the fixed Ring route set. The
+service has no path parameters and does not need a general-purpose routing
+dependency. Keep API-key protection in the endpoint response functions so
+routing and authorization remain separate concerns. Retain maps and functions
+as the internal event-source interface rather than introducing a protocol with
+no multiple implementation requirement beyond the two transport maps.
 
 ## Consequences
 
@@ -48,10 +47,9 @@ requirement beyond the two transport maps.
 - SSE and WS transports feed identical event maps to endpoint logic.
 - Unknown Chat fields can be deliberately dropped while Responses compatibility
   policy remains localized in translation.
-- Ruuter is intentionally a small routing dependency; a broader middleware
-  stack remains appropriate only if the API grows to many route-specific
-  policies. Reitit remains an alternative for a substantially larger route
-  graph, but is not needed alongside Ruuter for this service.
+- Direct dispatch keeps the server dependency closure small. A general-purpose
+  router can be reconsidered if the API grows to many parameterized routes or
+  route-specific middleware policies.
 
 ## Evidence
 

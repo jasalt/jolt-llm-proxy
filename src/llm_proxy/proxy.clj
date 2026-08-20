@@ -9,7 +9,6 @@
             [clojure.data.json :as json]
             [clojure.core.async :as async]
             [ring-chez.sse :as sse]
-            [ruuter.core :as ruuter]
             [codex.collect :as collect]
             [codex.translate :as tr]
             [llm-proxy.transport.sse :as transport-sse]
@@ -245,46 +244,49 @@
 ;; ---------------------------------------------------------------------------
 
 (defn route-table
-  "Return the Ring routes for one isolated runtime. Ruuter adds any matched
-  path parameters under `:params`; these exact routes currently need none."
+  "Return a direct Ring request dispatcher for one isolated runtime.
+  The proxy has a fixed set of exact paths, so a small method/path dispatch
+  avoids retaining a general-purpose routing dependency in the server."
   [runtime]
-  (let [routes [{:path "/health"
-                 :method :get
-                 :response (fn [_] (health))}
-                {:path "/v1/models"
-                 :method :get
-                 :response #(require-api-key runtime % (partial models runtime))}
-                {:path "/v1/chat/completions"
-                 :method :post
-                 :response (fn [req]
-                             (require-api-key runtime req
-                                              (fn [request] (chat runtime request))))}
-                {:path "/v1/responses"
-                 :method :post
-                 :response (fn [req]
-                             (require-api-key runtime req
-                                              (fn [request] (responses runtime request))))}]
-        ;; Keep dashboard responses live-reloadable. The lifecycle atom is
-        ;; dereferenced for every request, rather than capturing the startup
-        ;; runtime map in the compiled route closures.
-        runtime-state (:runtime-state runtime)
+  ;; Keep dashboard responses live-reloadable. The lifecycle atom is
+  ;; dereferenced for every request, rather than capturing the startup runtime
+  ;; map in the dashboard route closures.
+  (let [runtime-state (:runtime-state runtime)
         live-runtime #(or (when runtime-state @runtime-state) runtime)
-        dashboard-routes (when (:dashboard-enabled runtime)
-                           [{:path "/_llm-proxy"
-                             :method :get
-                             :response (fn [req] (dashboard/route (live-runtime) req))}
-                            {:path "/_llm-proxy/datastar.js"
-                             :method :get
-                             :response (fn [req] (dashboard/route (live-runtime) req))}
-                            {:path "/_llm-proxy/events"
-                             :method :get
-                             :response (fn [req] (dashboard/route (live-runtime) req))}])]
-    (conj (into routes dashboard-routes)
-          {:path :not-found
-           :response (fn [_] (write-openai-error 404 "not_found" "Not found"))})))
+        not-found (fn [_]
+                    (write-openai-error 404 "not_found" "Not found"))]
+    (fn [req]
+      (let [method (:request-method req)
+            uri (:uri req)]
+        (cond
+          (and (= :get method) (= "/health" uri))
+          (health)
+
+          (and (= :get method) (= "/v1/models" uri))
+          (require-api-key runtime req (partial models runtime))
+
+          (and (= :post method) (= "/v1/chat/completions" uri))
+          (require-api-key runtime req
+                           (fn [request] (chat runtime request)))
+
+          (and (= :post method) (= "/v1/responses" uri))
+          (require-api-key runtime req
+                           (fn [request] (responses runtime request)))
+
+          (and (:dashboard-enabled runtime)
+               (= :get method)
+               (contains? #{"/_llm-proxy"
+                            "/_llm-proxy/"
+                            "/_llm-proxy/datastar.js"
+                            "/_llm-proxy/events"}
+                          uri))
+          (dashboard/route (live-runtime) req)
+
+          :else
+          (not-found req))))))
 
 (defn app [runtime req]
-  (ruuter/route (route-table runtime) req))
+  ((route-table runtime) req))
 
 (defn make-handler
   "Build an isolated Ring handler from explicit runtime dependencies."
@@ -292,14 +294,14 @@
   (let [runtime (if (:requests runtime)
                   runtime
                   (assoc runtime :requests (atom 0)))
-        routes (ruuter/compile-routes (route-table runtime))]
+        dispatch (route-table runtime)]
     (fn [req]
       ;; Dashboard page, bundle, and SSE polling are operator traffic rather
       ;; than proxied client requests; keep them out of the API request metric.
       (when-not (str/starts-with? (or (:uri req) "") "/_llm-proxy")
         (swap! (:requests runtime) inc))
       (try
-        (ruuter/route routes req)
+        (dispatch req)
         (catch Throwable request-error
           (error/log! :error :request-failed request-error
                       {:method (:request-method req) :uri (:uri req)})

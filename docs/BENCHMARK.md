@@ -2,9 +2,10 @@
 
 ## Scope
 
-This is an idle-memory investigation of the standalone Jolt build. No
-application code was changed for the experiments. Measurements were taken on
-this Linux x86-64 environment using the optimized, direct-linked build:
+This is an idle-memory investigation of the standalone Jolt build. Initial
+measurements were taken before the routing optimization; post-optimization
+measurements are included below. Measurements were taken on this Linux x86-64
+environment using the optimized, direct-linked build:
 
 ```sh
 jolt build -m llm-proxy.core \
@@ -111,21 +112,32 @@ data retained by the process:
 The measured RSS is mostly private resident memory, so heap-reservation tuning
 is not the first-order solution for this target.
 
-## Recommended work order
+## Post-optimization result
 
-### 1. Replace Ruuter with direct dispatch
+Ruuter was removed from `deps.edn` and replaced with a direct exact
+method/path dispatcher in `llm-proxy.proxy`. The optimized rebuilt server was
+measured with the same procedure:
 
-Implement a small explicit dispatcher for the finite route set, preserving the
-existing route and API tests. This is expected to provide the dominant memory
-reduction and should be benchmarked with the same RSS/PSS procedure.
+| Configuration | RSS | PSS | Threads |
+|---|---:|---:|---:|
+| HTTP only | **58.8 MiB** | 53.0 MiB | 11 |
+| Dashboard + nREPL | **59.1 MiB** | 53.3 MiB | 12 |
 
-### 2. Rebuild and verify the real server
+This is approximately a 56 MiB RSS reduction, or 42%, from the 134.7 MiB
+HTTP-only baseline, and meets the idle RSS target with substantial margin.
+The optimized executable produced by this rebuild was approximately 18 MiB.
 
-After the dispatcher replacement, measure all four configurations again. The
-acceptance criterion should be idle HTTP-only RSS below 100 MiB, with dashboard
-and nREPL measured separately.
+The route and full test suite passed after the replacement.
 
-### 3. Reduce optional build closure if additional margin is required
+## Recommended follow-up work
+
+### 1. Preserve the memory regression benchmark
+
+Keep the same idle RSS/PSS measurement in release validation. The acceptance
+criterion is idle HTTP-only RSS below 100 MiB, with dashboard and nREPL
+measured separately.
+
+### 2. Reduce optional build closure if additional margin is required
 
 Potential follow-ups are:
 
@@ -139,9 +151,11 @@ The nREPL and dashboard flags themselves showed negligible idle RSS
 difference in the current build because their namespaces are linked into the common
 application closure regardless of whether the feature is enabled.
 
-### 4. Defer low-value tuning
+### 3. Defer low-value tuning
 
 Reducing worker threads and changing Chez heap reservation parameters should
 not be attempted as the first fix. The process used 11 threads, but the
 standalone probe used one thread and still retained the dependency-driven
-memory. The dependency closure, especially Ruuter, is the dominant factor.
+memory. The dependency closure, especially Ruuter before its removal, was the
+dominant factor. Chez heap-reservation tuning and worker-thread changes were
+not needed to meet the target.
