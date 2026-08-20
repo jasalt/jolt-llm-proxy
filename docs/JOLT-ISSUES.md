@@ -17,8 +17,7 @@ checkout is explicitly required. File issues in the repository named in each
 entry. Clojure semantic divergences belong in `CLOJURE-CONVERGENCE.md`; local
 workflow and platform notes belong in `JOLT-GOTCHAS.md`.
 
-## Report upstream
-
+## Issue outbox
 ### JI-1: brepl loses successful stdout when the same eval later fails
 
 **Upstream:** <https://github.com/licht1stein/brepl> (not Jolt core)
@@ -188,6 +187,63 @@ streams to the parent and return the builder, matching the JVM API.
 **Impact:** Ported process-launch code using the standard convenience method
 fails at runtime. This project only needs inherited stdin for `stty`, so it uses
 `.redirectInput` as a narrow workaround.
+
+## Issue sent
+### JI-7: ring-chez-adapter frames UTF-8 request bodies by character count
+
+**Filed:**
+- <https://github.com/jasalt/jolt-llm-proxy/issues/2>
+- <https://github.com/jolt-lang/ring-chez-adapter/issues/11>
+
+**Upstream:** <https://github.com/jolt-lang/ring-chez-adapter>
+
+**Status:** Confirmed against pinned commit
+`665508bbf329bc046fa06bca1ed9cebee257686b` and upstream main
+`8b39e6cea319bf92c088055d21803d210f0212fd` on 2026-08-20. No matching
+upstream issue was found.
+
+`ring-chez.http/read-request` appends each socket recv using
+`jolt.ffi/read-bytes`, then compares `(count acc)` with the HTTP
+`Content-Length`. `read-bytes` decodes UTF-8 to a codepoint-indexed Jolt string,
+but `Content-Length` is an octet count. A request containing any multibyte UTF-8
+character therefore appears shorter than declared. The adapter waits for bytes
+that will never arrive and eventually returns its plain `400 Bad Request`
+before invoking the Ring handler.
+
+A minimal wire request is:
+
+```http
+POST / HTTP/1.1\r
+Host: localhost\r
+Content-Type: application/json\r
+Content-Length: 14\r
+\r
+{"text":"—"}
+```
+
+The JSON body is 14 UTF-8 bytes but 12 Jolt characters. A server started with
+`ring-chez.adapter/run-server` does not invoke its handler and answers 400 after
+the receive timeout. Replacing the em dash with one ASCII character and changing
+`Content-Length` to 12 reaches the handler.
+
+The issue also reproduces with Pi's OpenAI client: the `pi-smart-fetch` tool
+schema contains one em dash, producing a valid 7,999-byte request whose decoded
+string has 7,997 characters. ASCII-only tools work against the same endpoint.
+
+**Expected:** Accumulate socket data as byte arrays (`jolt.ffi/read-array`), find
+the ASCII header terminator in bytes, apply `Content-Length` and request caps to
+byte counts, and decode exactly the framed request as UTF-8 only after the full
+body is present. Byte accumulation also prevents a multibyte codepoint split
+across two `recv` calls from being decoded independently.
+
+**Impact:** Any non-ASCII prompt, system message, tool description, or JSON
+schema can time out as a misleading adapter-level 400. The application cannot
+classify or log the failure because its Ring handler is never called.
+
+**Local workaround:** `llm-proxy.utf8-request` installs a byte-based replacement
+for `ring-chez.http/read-request` before adapter workers start. It includes a
+regression that splits an em dash inside its three-byte UTF-8 sequence. Remove
+the workaround after pinning an upstream fix.
 
 ## Valid but low-priority documentation contribution
 
