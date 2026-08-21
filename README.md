@@ -24,7 +24,7 @@ history.
 
 ## Prerequisites
 
-- Jolt v0.7.16 (the tested version)
+- Jolt v0.7.20 (the tested version; includes `ProcessBuilder.inheritIO()`)
 - Linux x86_64 with glibc and system OpenSSL 3
 - Git/network access on first run so Jolt can resolve the exact dependency SHAs
   pinned in `deps.edn`
@@ -132,7 +132,7 @@ outbound TLS + the hand-rolled RFC 6455 WebSocket client use
 
 ## Architecture
 
-```
+```text
 client ──HTTP/1.1──▶ ring-chez.adapter/run-server ──▶ llm-proxy.proxy/make-handler
                                                           │  translate (chat↔responses)
                                                           │  continuation (delta + prefix)
@@ -231,7 +231,7 @@ See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §7–§8.
 
 ## References
 
-- Original Go implementation: https://github.com/jasalt/chatgpt-openai-api-adapter
+- Original Go implementation: <https://github.com/jasalt/chatgpt-openai-api-adapter>
   (`proxy.go`, `websocket.go`, `continuation.go`, `translate.go`, `auth.go`).
 - Jolt: <https://github.com/jolt-lang/jolt> · `llms.txt` at its repo root.
 - ring-chez-adapter: <https://github.com/jolt-lang/ring-chez-adapter>

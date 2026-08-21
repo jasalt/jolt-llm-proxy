@@ -74,15 +74,13 @@
 
   A sandbox can start Bash with canonical input but `icrnl` disabled. In that
   state the kernel echoes Enter as `^M` but does not release the canonical line
-  to this process, so no application-level reader can consume it. Use inherited
-  stdio so `stty` operates on fd 0; opening /dev/tty can be denied in a jail."
+  to this process, so no application-level reader can consume it. Inherit stdio
+  so `stty` operates on fd 0; opening /dev/tty can be denied in a jail."
   []
   (try
-    (let [process (-> (ProcessBuilder. ["stty" "icrnl"])
-                      ;; Jolt v0.7.13 does not implement ProcessBuilder.inheritIO.
-                      ;; Inheriting fd 0 is sufficient for stty's tcsetattr.
-                      (.redirectInput ProcessBuilder$Redirect/INHERIT)
-                      (.start))]
+    (let [process (.. (ProcessBuilder. ["stty" "icrnl"])
+                      inheritIO
+                      start)]
       (zero? (.waitFor process)))
     (catch Throwable _ false)))
 
