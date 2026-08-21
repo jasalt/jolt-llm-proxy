@@ -36,6 +36,21 @@ jolt -e '(require (quote llm-proxy.core))'
 jolt -M:test -m llm-proxy.test-runner
 ```
 
+## Nix
+
+The flake follows Jolt's upstream Nix setup and provides a development shell
+plus a launcher package. It supports `x86_64-linux` and `aarch64-darwin`.
+
+```bash
+nix develop
+nix build .#default
+./result/bin/jolt-llm-proxy --help
+nix run . -- serve --port 8090
+```
+
+The launcher runs the project from the flake source with Jolt; the first run
+may fetch the pinned `deps.edn` dependencies into Jolt's user cache.
+
 ## Usage
 
 The commands below work identically through Jolt or the standalone binary;
