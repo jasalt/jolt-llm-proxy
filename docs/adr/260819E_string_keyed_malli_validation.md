@@ -51,7 +51,9 @@ data stays in local `ex-data` and is not serialized to clients.
   coercion or schema transformers.
 - Malli maps, explanations, bounds, tuples, enums, regexes, map-of, multi
   schemas, humanization, transforms, JSON Schema/Swagger transforms, and
-  generators were exercised successfully on Jolt v0.7.13.
+  generators were exercised successfully on Jolt v0.7.20. Standard
+  `test.check` string generators are generator values, so use
+  `(gen/generate gen/string-alphanumeric)` without invoking the value.
 - No reproducible Jolt/Malli defect or required local dynaload shim was found
   under normal project dependency resolution.
 
