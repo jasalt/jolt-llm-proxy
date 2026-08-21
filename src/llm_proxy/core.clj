@@ -12,7 +12,6 @@
             [codex.auth :as auth]
             [codex.ws :as ws]
             [llm-proxy.proxy :as proxy]
-            [llm-proxy.utf8-request :as utf8-request]
             [codex.cli :as cli]
             [llm-proxy.id :as id]
             [llm-proxy.time :as time]))
@@ -74,13 +73,9 @@
                    ;; patches without recompiling the Ring routes.
                    :runtime-state system
                    :dashboard-enabled dashboard}
-          handler (proxy/make-handler runtime)]
-      ;; ring-chez-adapter currently compares decoded character counts with
-      ;; byte-based Content-Length. Install byte-correct framing before its
-      ;; worker threads start so non-ASCII prompts and tool schemas reach Ring.
-      (utf8-request/install!)
-      (let [started (atom {})]
-        (try
+          handler (proxy/make-handler runtime)
+          started (atom {})]
+      (try
           (let [srv (run-server handler
                       {:port port
                        :strategy :threads
@@ -112,7 +107,7 @@
               (try (ws/close-conn (:conn sess)) (catch Throwable _ nil)))
             (reset! (:sessions pool) {})
             (reset! system nil)
-            (throw e)))))))
+            (throw e))))))
 
 (defn stop!
   "Shut down the server, close pooled WS connections, clear system."
@@ -161,8 +156,9 @@
                           :restrict-args true
                           :no-keyword-opts true}))
 
-(defn- nrepl-flag? [args]
+(defn nrepl-flag?
   "True only when the explicit development/debug nREPL flag is present."
+  [args]
   (true? (:nrepl (serve-options args))))
 
 (defn serve-command
