@@ -20,12 +20,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn b64url-encode
-  "Base64url-encode bytes without padding (the shim lacks getUrlEncoder)."
+  "Base64url-encode bytes without padding."
   [b]
-  (-> (.encodeToString (java.util.Base64/getEncoder) b)
-      (.replace "+" "-")
-      (.replace "/" "_")
-      (.replace "=" "")))
+  (.encodeToString (.withoutPadding (java.util.Base64/getUrlEncoder)) b))
 
 (defn random-bytes [n]
   (id/random-bytes n))

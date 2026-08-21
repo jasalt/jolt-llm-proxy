@@ -10,3 +10,6 @@
     (is (= expected
            (cli/read-console-line
             (java.io.BufferedReader. (java.io.StringReader. input)))))))
+
+(deftest encodes-url-safe-base64-without-padding
+  (is (= "_w" (cli/b64url-encode (byte-array [(byte -1)])))))

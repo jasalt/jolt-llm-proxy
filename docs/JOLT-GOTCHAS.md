@@ -146,31 +146,7 @@ shapes by eye impossible without `(jolt.host/ref-get tt k)` probes.
 
 ---
 
-## 6. `java.util.Base64` shim lacks the URL variants
-
-The Jolt `java.util.Base64` shim implements `getEncoder`/`getDecoder` (standard
-base64) but **not** `getUrlEncoder`/`getUrlDecoder`. Calling
-`java.util.Base64/getUrlDecoder` throws
-`No matching field or method: java.util.Base64/getUrlDecoder`.
-
-This bites JWT decoding (JWT payloads are base64url). Workaround: translate
-base64url to standard base64 before decoding:
-
-```clojure
-(defn b64url->b64std [s]
-  (let [pad (mod (- 4 (mod (count s) 4)) 4)]
-    (-> (str s (apply str (repeat pad "=")))
-        (.replace "-" "+") (.replace "_" "/"))))
-(.decode (java.util.Base64/getDecoder) (.getBytes (b64url->b64std part) "UTF-8"))
-```
-
-Verified against a live OpenAI access token: the decoded payload's
-`:https://api.openai.com/auth` → `:chatgpt_account_id` matches `auth.json`.
-See `JOLT-ISSUES.md` JI-4.
-
----
-
-## 7. The AOT cache (`~/.jolt/aot-cache`) makes fresh processes diverge from the live nREPL
+## 6. The AOT cache (`~/.jolt/aot-cache`) makes fresh processes diverge from the live nREPL
 
 **Surprise.** `require` goes through `aot-compile-and-cache` (visible in
 stack traces): each compiled namespace is written to `~/.jolt/aot-cache`
@@ -206,11 +182,11 @@ jolt -e "(do (require 'codex.cli)
   `(declare later-fn)` — verified working in Jolt.
 - **Do not trust "the namespace loaded" as success.** `require` returning
   without error only means the reader+compiler ran; it says nothing about
-  which defs actually got bound (see §8).
+  which defs actually got bound (see §7).
 
 ---
 
-## 8. A missing paren silently swallows the rest of the file — vars become "unbound", not "missing"
+## 7. A missing paren silently swallows the rest of the file — vars become "unbound", not "missing"
 
 **Surprise.** If a top-level form is missing its final closing delimiter, the
 reader does not fail — it keeps reading, and **every following top-level form

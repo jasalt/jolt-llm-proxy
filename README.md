@@ -215,7 +215,7 @@ handshake (`tls-connect` + `ref-get` + masked-frame-ready write). It returns
   (tagged-table access, pkill self-match, nREPL persistence, brepl stdout,
   opaque printing).
 - [`JOLT-ISSUES.md`](./docs/JOLT-ISSUES.md) — reviewed upstream reports,
-  including brepl output loss and Jolt's missing base64url shim.
+  including brepl output loss and Jolt's AOT-cache behavior.
 - [`CLOJURE-CONVERGENCE.md`](./docs/CLOJURE-CONVERGENCE.md) — reviewed
   Clojure/Jolt convergence observations.
 - [`docs/adr/`](./docs/adr/) — accepted architectural decisions and completed
@@ -227,7 +227,7 @@ use `jolt.host/ref-get` (but never on Ring PMaps, where it is the wrong
 accessor). And the **AOT cache + reader form-swallowing** trap: a top-level
 form missing its closing paren silently absorbs the rest of the file, leaving
 vars *interned but unbound*, while `brepl balance` fails with `Unable to fix`.
-See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §7–§8.
+See [`JOLT-GOTCHAS.md`](./docs/JOLT-GOTCHAS.md) §6–§7.
 
 ## References
 

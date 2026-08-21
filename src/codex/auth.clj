@@ -41,6 +41,7 @@
 ;; Jolt's java.io.File shim has rename/delete but no permission methods. Bind
 ;; the small POSIX surface directly so OAuth refresh tokens never inherit a
 ;; permissive umask. Modes are octal: 0700 = 448, 0600 = 384.
+(declare c-chmod)  ; satisfy clj-kondo/LSP
 (ffi/defcfn c-chmod "chmod" [:pointer :int] :int)
 
 (def credential-keys
@@ -102,22 +103,13 @@
 ;; JWT helpers
 ;; ---------------------------------------------------------------------------
 
-(defn b64url->b64std
-  "Convert base64url (JWT payloads) to standard base64 for the shim's decoder."
-  [s]
-  (let [pad (mod (- 4 (mod (count s) 4)) 4)]
-    (-> (str s (apply str (repeat pad "=")))
-        (.replace "-" "+")
-        (.replace "_" "/"))))
-
 (defn decode-jwt-payload
   "Return the decoded JWT payload (keyword keys) for `token`, or nil."
   [token]
   (let [parts (str/split token #"\.")]
     (when (>= (count parts) 2)
       (let [part (nth parts 1)
-            decoded (.decode (java.util.Base64/getDecoder)
-                             (.getBytes (b64url->b64std part) "UTF-8"))]
+            decoded (.decode (java.util.Base64/getUrlDecoder) part)]
         (json/read-str (String. decoded "UTF-8") :key-fn keyword)))))
 
 (defn account-id-from-jwt

@@ -1,5 +1,5 @@
 (ns codex.auth-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [codex.auth :as auth]))
 
 (defn- temp-path []
@@ -16,6 +16,14 @@
       (is (not (contains? (auth/load-cred path) :lock)))
       (finally
         (auth/logout! (auth/start! path))))))
+
+(deftest decodes-url-safe-base64-jwt-payload
+  (let [token (str "header."
+                   "eyJleHAiOjEyMywiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7"
+                   "ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3QifX0"
+                   ".signature")]
+    (is (= 123 (:exp (auth/decode-jwt-payload token))))
+    (is (= "acct" (auth/account-id-from-jwt token)))))
 
 (deftest token-refresh-uses-store-clock-and-http-client
   (let [requests (atom [])

@@ -4,9 +4,9 @@ Reproducible upstream gaps encountered while porting
 `chatgpt-openai-api-adapter` to Jolt. This file is a triage queue, not a claim
 that every surprising behavior is a Jolt bug.
 
-Reviewed 2026-08-19 against:
+Reviewed 2026-08-21 against:
 
-- Jolt **v0.7.16** (current release; original observations used v0.7.13)
+- Jolt **v0.7.20** (current release; original observations used v0.7.13)
 - brepl **2.7.1**
 - `jolt-lang/http-client` commit
   `6faba3570378df91c2c84a588a262b732f4f1858`
@@ -18,11 +18,12 @@ entry. Clojure semantic divergences belong in `CLOJURE-CONVERGENCE.md`; local
 workflow and platform notes belong in `JOLT-GOTCHAS.md`.
 
 ## Issue outbox
+
 ### JI-1: brepl loses successful stdout when the same eval later fails
 
 **Upstream:** <https://github.com/licht1stein/brepl> (not Jolt core)
 
-**Status:** Confirmed with brepl 2.7.1 and a Jolt v0.7.16 nREPL server. No
+**Status:** Confirmed with brepl 2.7.1 and a Jolt v0.7.20 nREPL server. No
 matching issue was found in the upstream tracker on 2026-08-19.
 
 This is most clearly a brepl client bug: `--verbose` proves that the server sent
@@ -153,13 +154,13 @@ A misplaced delimiter can make later `def` forms part of an earlier `defn`
 while leaving the whole file syntactically balanced. That is ordinary Lisp
 structure, not a reader bug. `brepl balance` checks delimiter balance; it cannot
 infer the programmer's intended top-level form boundaries. See
-`JOLT-GOTCHAS.md` §8.
+`JOLT-GOTCHAS.md` §7.
 
 ### AOT-cache observations
 
-The stale/mixed AOT-cache symptoms in `JOLT-GOTCHAS.md` §7 are operationally
+The stale/mixed AOT-cache symptoms in `JOLT-GOTCHAS.md` §6 are operationally
 important but currently lack a minimal sequence that starts from an empty temp
 project/cache and deterministically produces the wrong result on current Jolt.
 Do not file the narrative as an upstream bug. First produce a script that owns
 its temporary `HOME`, edits one namespace, runs a fixed sequence of fresh Jolt
-processes, and asserts stale output; then retest v0.7.16 and main.
+processes, and asserts stale output; then retest v0.7.20 and main.
