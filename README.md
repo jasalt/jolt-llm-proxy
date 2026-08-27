@@ -109,6 +109,58 @@ without one fall back to plain SSE. Credentials live at
 file are maintained with modes `0700` and `0600`; startup tightens an existing
 credential file before reading it.
 
+## Use with the Pi coding agent
+
+Pi can use the proxy as a custom OpenAI Chat Completions provider. Start the
+proxy with the same key used in Pi (the port below matches the usage example):
+
+```bash
+JOLT_LLM_PROXY_API_KEY=my-key jolt -m llm-proxy.core serve --port 8090
+```
+
+Add this provider to `~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "jolt-llm-proxy": {
+      "baseUrl": "http://127.0.0.1:8090/v1",
+      "api": "openai-completions",
+      "apiKey": "my-key",
+      "compat": {
+        "sendSessionAffinityHeaders": true,
+        "sessionAffinityFormat": "openrouter",
+        "supportsLongCacheRetention": false
+      },
+      "models": [
+        { "id": "gpt-5.3-codex-spark", "input": ["text", "image"] },
+        { "id": "gpt-5.4", "input": ["text", "image"] },
+        { "id": "gpt-5.4-mini", "input": ["text", "image"] },
+        { "id": "gpt-5.5", "input": ["text", "image"] },
+        { "id": "gpt-5.6-luna", "input": ["text", "image"] },
+        { "id": "gpt-5.6-sol", "input": ["text", "image"] },
+        { "id": "gpt-5.6-terra", "input": ["text", "image"] }
+      ]
+    }
+  }
+}
+```
+
+Select a model with `pi --provider jolt-llm-proxy --model gpt-5.4` (or use
+`/model` interactively). `sessionAffinityFormat: "openrouter"` is intentional:
+Pi then sends `x-session-id`, one of the two affinity headers this proxy
+accepts (`x-prompt-cache-key` is the other). With affinity enabled, Pi
+conversation sessions use the proxy's pooled WebSocket delta continuation;
+without it, requests use the proxy's SSE fallback and static-prefix caching.
+The proxy's `/v1/models` response is the source of truth for the model IDs
+listed above.
+
+`supportsLongCacheRetention` is disabled because this adapter explicitly
+implements the stable `prompt_cache_key`/session behavior; it does not promise
+Pi's provider-specific long-retention request field. The proxy still forwards
+supported text, image, tool, structured-output, and reasoning request fields
+through its Chat Completions translation.
+
 ## Build a standalone binary
 
 Jolt resolves the pinned dependencies, compiles the `llm-proxy.core` entry
