@@ -1,19 +1,19 @@
 # 260819J — Propose an optional Datastar SSE operator dashboard
 
 - **Date:** 2026-08-19
-- **Status:** Implemented (initial local-only dashboard)
+- **Status:** Implemented (Glimmer + `glimmer-datastar` dashboard)
 
 ## Context
 
-The Jolt Glimmer/Datastar example demonstrates a server-driven browser UI:
+The pinned `jolt-lang/glimmer-datastar` integration provides a server-driven
+browser UI:
 
-- a browser-side vendored Datastar bundle patches a selected HTML fragment
+- the browser-side vendored Datastar bundle patches a selected HTML fragment
   without a page reload;
-- the implementation uses `ring-chez.sse` directly: an initial event plus a
-  watch on the runtime request counter and a one-second refresh loop emit
-  `datastar-patch-elements` events;
-- no server-side Glimmer atom, `jolt.datastar.core` wrapper, or browser actions
-  are used.
+- one Glimmer ratom contains the latest bounded `llm-proxy.inspect/snapshot`;
+- an Ebb sampler refreshes that presentation value once per second;
+- `jolt.datastar.core/wrap-datastar` tracks the ratom during rendering, emits
+  changed `datastar-patch-elements` output, and suppresses unchanged HTML.
 
 The proxy already uses Ring Chez and SSE, but its existing SSE is an **outbound
 Codex transport** and its public inbound endpoints are OpenAI-compatible API
@@ -59,12 +59,13 @@ It is a second optional operator interface over HTTP/SSE.
   at `/v1/*`.
 - Keep dashboard code in `llm-proxy.dashboard`, distinct from the outbound
   `llm-proxy.transport.sse` namespace.
-- Use the existing Ruuter route table to mount the optional routes; the
-  Datastar wrapper should wrap only the dashboard branch or be demonstrated not
-  to alter OpenAI/SSE streaming route semantics.
-- Keep the dashboard dependency-free on the server: it uses the existing Ring
-  SSE primitives and string rendering. The vendored browser asset is embedded
-  with `resources/`; normal `serve` does not install dashboard routes.
+- Wrap only the dashboard sub-handler with `jolt.datastar.core/wrap-datastar`;
+  the OpenAI API and its SSE responses never pass through Datastar middleware.
+- Serve the page and its SSE subscription from the same `/_llm-proxy/` route,
+  distinguished by Datastar's query convention. The old explicit
+  `/_llm-proxy/events` endpoint is intentionally removed.
+- Keep the vendored browser asset embedded with `resources/`; normal `serve`
+  does not install dashboard routes and no CDN is contacted at runtime.
 - Vendor a fixed, reviewed Datastar browser bundle in project resources and
   embed it only in a dashboard-enabled standalone build. Do not load a CDN
   script at operator-page runtime.
@@ -77,12 +78,13 @@ It is a second optional operator interface over HTTP/SSE.
   process start time, listener configuration, and feature/authentication state.
   Error totals, SSE fallback count, token-refresh outcomes, and latency metrics
   remain future additions.
-- Project those statistics through a pure redaction function into an immutable
-  snapshot. A Glimmer ratom may hold that projection solely to trigger UI
-  renders.
-- Use bounded per-tab SSE channels. The implementation emits an initial patch,
-  watches request-count changes, and refreshes uptime once per second; a failed
-  channel offer removes the watch and closes the channel.
+- Project those statistics through the pure redaction function into one
+  immutable snapshot held by a Glimmer ratom. Render code observes only this
+  presentation cell, never the runtime, token store, or WebSocket pool.
+- A core-owned Ebb task samples the safe snapshot once per second. Its explicit
+  cancellation function is run during normal shutdown and startup rollback.
+- `glimmer-datastar` owns per-tab SSE channels, reactive subscriptions,
+  re-rendering, unchanged-HTML suppression, and disconnect cleanup.
 - Render a compact overview first: process uptime, listener state,
   authenticated/not-authenticated state, API-key-enabled boolean, request/error
   counters, and pooled/busy/idle WebSocket counts. Avoid unbounded tables;
@@ -123,13 +125,11 @@ administrative commands with their own authorization review.
   healthy: distinguish proxy listener health from backend authentication and
   latest-upstream-result state.
 
-## Adoption gate
+## Dependency adoption
 
-The example consumes `jolt-lang/datastar` as a workspace-local dependency and
-therefore does not provide a suitable pinned Jolt runtime dependency for this
-project. The initial implementation resolves that adoption gate by using the
-existing Ring SSE primitives and vendoring the official Datastar v1.0.2 browser
-bundle from jsDelivr's GitHub source:
+The migration pins `jolt-lang/glimmer-datastar` at an exact commit. Its
+transitive Glimmer revision and v1.0 wire protocol are compatible with the
+vendored official Datastar v1.0.2 browser bundle:
 
 ```text
 resources/public/js/datastar.js
@@ -138,10 +138,9 @@ SHA-256: 2837d87acf6ee0ba8e4e63765926c25a98d63883b02f88be194a86b81d3fd24a
 
 The bundle is loaded only by the explicit dashboard route and is embedded in
 standalone builds through `:jolt/build`; no CDN request is made at runtime.
-The wrapper behavior, SSE formatting, disconnect behavior, and resource loading
-are covered by the deterministic tests on the target Jolt release. A future
-adoption of `jolt-lang/datastar` still requires a release/tag and pinned commit
-SHA.
+Middleware behavior, wire formatting, unchanged-render suppression, disconnect
+cleanup, and resource loading are covered by deterministic tests on the pinned
+Jolt release.
 
 ## Consequences
 
@@ -172,8 +171,7 @@ SHA.
    `/v1/*` API routes.
 3. Tests prove a dashboard SSE subscription receives a redacted initial
    fragment and route traffic is excluded from the request metric. The
-   implementation removes its watcher when a bounded channel can no longer
-   accept an update.
+   Glimmer/Datastar subscription unregisters after the response channel closes.
 4. Tests prove no snapshot, rendered HTML, event, or error response contains
    tokens, API keys, raw session IDs, prompts, or upstream body data.
 5. The dashboard’s optional wrapper does not change existing Chat/Responses SSE

@@ -91,8 +91,11 @@ jolt -m llm-proxy.core licenses # third-party license notice
 
 The dashboard is loopback-only, read-only, and must not be exposed through a
 reverse proxy without a separately reviewed browser authentication design. It
-vendors Datastar v1.0.2 under `resources/public/js/datastar.js`; normal proxy
-startup does not enable the dashboard.
+renders the redacted inspection snapshot through Glimmer and
+`glimmer-datastar`; the Datastar SSE subscription uses the same
+`/_llm-proxy/` URL as the page. It vendors Datastar v1.0.2 under
+`resources/public/js/datastar.js`; normal proxy startup does not enable the
+dashboard.
 
 `JOLT_LLM_PROXY_ADDR` accepts only `127.0.0.1:<port>` or
 `localhost:<port>` because the current Ring adapter is loopback-only. With no

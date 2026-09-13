@@ -59,10 +59,11 @@
        (take 16)
        vec))
 
-(defn- input-error [exception]
+(defn- input-error
   "Wrap a rejected client request with diagnostics that are safe to log.
   Malli's explanation contains submitted values, so retain only field paths.
   Translation failures intentionally expose no exception message."
+  [exception]
   (let [explanation (:malli/explain (ex-data exception))
         fields (when explanation (invalid-field-paths explanation))]
     (ex-info "invalid client request"
@@ -277,16 +278,12 @@
                (= :get method)
                (contains? #{"/_llm-proxy"
                             "/_llm-proxy/"
-                            "/_llm-proxy/datastar.js"
-                            "/_llm-proxy/events"}
+                            "/_llm-proxy/datastar.js"}
                           uri))
           (dashboard/route (live-runtime) req)
 
           :else
           (not-found req))))))
-
-(defn app [runtime req]
-  ((route-table runtime) req))
 
 (defn make-handler
   "Build an isolated Ring handler from explicit runtime dependencies."
