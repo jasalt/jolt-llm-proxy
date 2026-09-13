@@ -167,3 +167,12 @@
     (is (= true (get-in snapshot [:codex :ws-pool :sessions 0 :continuation])))
     (is (not= "raw-session-id"
               (get-in snapshot [:codex :ws-pool :sessions 0 :id])))))
+
+(deftest chassis-escapes-snapshot-content
+  (let [snapshot (assoc-in (inspect/snapshot (runtime))
+                           [:listener :address]
+                           "<script>private</script>")
+        fragment (ns-resolve 'llm-proxy.dashboard 'fragment)
+        html (fragment snapshot)]
+    (is (.contains html "&lt;script&gt;private&lt;/script&gt;"))
+    (is (not (.contains html "<script>private</script>")))))

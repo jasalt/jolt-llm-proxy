@@ -4,7 +4,10 @@
                   ;; Kept explicit even though Malli currently brings it transitively:
                   ;; property tests are an intentional test-suite dependency.
                   :extra-deps {org.clojure/test.check {:mvn/version "1.1.3"}}}}
- :deps {jlt-commons/ebb
+ :deps {dev.onionpancakes/chassis
+        {:git/url "https://github.com/onionpancakes/chassis"
+         :git/sha "3e98fdc5ac25da7b863c4413cfebbe7ad326d787"}
+        jlt-commons/ebb
         {:git/url "https://github.com/jlt-commons/ebb"
          :git/sha "cd3b36ddd07be14f81c3690d084a44adcb08a5c2"}
         jolt-lang/glimmer-datastar

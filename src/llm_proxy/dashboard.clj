@@ -2,6 +2,7 @@
   "Optional read-only Glimmer/Datastar operator dashboard. The only reactive
   value is a bounded, redacted `inspect/snapshot` presentation model."
   (:require [clojure.java.io :as io]
+            [dev.onionpancakes.chassis.core :as chassis]
             [ebb.core :as m]
             [glimmer.ratom :as ratom]
             [jolt.datastar.core :as datastar]
@@ -16,75 +17,117 @@
       (m/? (sleep-task interval-ms))
       (recur))))
 
-(defn- escape-html [value]
-  (let [s (str value)]
-    (-> s
-        (.replace "&" "&amp;")
-        (.replace "<" "&lt;")
-        (.replace ">" "&gt;")
-        (.replace "\"" "&quot;")
-        (.replace "'" "&#39;"))))
+(defn- reduce-tree-jolt
+  "Chassis uses ArrayDeque.pollFirst, which is not exposed by Jolt's Java
+  shim. Keep Chassis' traversal and serialization, swapping only this stack
+  primitive for the equivalent removeFirst operation."
+  [branch? children rf init root]
+  (let [stack (java.util.ArrayDeque. 32)]
+    (loop [cur (.iterator ^Iterable (vector root)) ret init]
+      (if (reduced? ret)
+        (.deref ^clojure.lang.IDeref ret)
+        (if (some? cur)
+          (if (.hasNext cur)
+            (let [node (.next cur)]
+              (if (branch? node)
+                (do
+                  (.addFirst stack cur)
+                  (recur (.iterator ^Iterable (children node)) ret))
+                (recur cur (rf ret node))))
+            (recur (when (pos? (.size stack)) (.removeFirst stack)) ret))
+          ret)))))
 
-(defn- session-row [{:keys [id state age-seconds idle-seconds continuation]}]
-  (str "<tr><td>" (escape-html id) "</td><td>" (escape-html (name state))
-       "</td><td>" (escape-html age-seconds) "s</td><td>"
-       (escape-html (or idle-seconds "—")) "</td><td>"
-       (if continuation "yes" "no") "</td></tr>"))
+(defn- chassis-html
+  [tree]
+  (let [sb (StringBuilder. 16384)]
+    (reduce-tree-jolt chassis/branch? chassis/children chassis/append-fragment sb tree)
+    (.toString sb)))
+(defn- session-row
+  [{:keys [id state age-seconds idle-seconds continuation]}]
+  [:tr
+   [:td id]
+   [:td (or (some-> state name) "")]
+   [:td age-seconds "s"]
+   [:td (or idle-seconds "—")]
+   [:td (if continuation "yes" "no")]])
 
-(defn- fragment [snapshot]
+(defn- definition-list
+  [entries]
+  [:dl
+   (mapcat (fn [[term value]] [[:dt term] [:dd value]]) entries)])
+
+(defn- fragment-tree
+  [snapshot]
   (let [pool (get-in snapshot [:codex :ws-pool])
         features (:features snapshot)
         token-expiry (get-in snapshot [:codex :token-expiry-seconds])]
-    (str "<h2>Runtime</h2><dl>"
-         "<dt>Listener</dt><dd>" (escape-html (get-in snapshot [:listener :address])) "</dd>"
-         "<dt>nREPL Listener</dt><dd>" (if (:nrepl-enabled features)
-                                          (escape-html (get-in snapshot [:nrepl :address]))
-                                          "Disabled") "</dd>"
-         "<dt>Uptime</dt><dd>" (escape-html (:uptime-seconds snapshot)) " seconds</dd>"
-         "<dt>Requests served</dt><dd>" (escape-html (:requests snapshot)) "</dd>"
-         "<dt>Request limit</dt><dd>" (escape-html (get-in snapshot [:listener :request-limit-bytes])) " bytes</dd>"
-         "<dt>API-key guard</dt><dd>" (if (:api-key-auth-enabled features) "enabled" "disabled") "</dd>"
-         "<dt>Codex authentication</dt><dd>" (if (get-in snapshot [:codex :authenticated]) "ready" "not ready") "</dd>"
-         "<dt>Token expiry</dt><dd>" (if (some? token-expiry)
-                                         (str (escape-html token-expiry) " seconds remaining")
-                                         "unavailable") "</dd></dl>"
-         "<h2>WebSocket pool</h2><dl>"
-         "<dt>Sessions</dt><dd>" (escape-html (:entries pool)) " / " (escape-html (:capacity pool))
-         " (busy " (escape-html (:busy pool)) ", idle " (escape-html (:idle pool)) ")</dd>"
-         "<dt>Continuations</dt><dd>" (escape-html (:with-continuation pool)) "</dd>"
-         "<dt>Idle TTL</dt><dd>" (escape-html (:idle-ttl-seconds pool)) " seconds</dd>"
-         "<dt>Maximum age</dt><dd>" (escape-html (:max-age-seconds pool)) " seconds</dd></dl>"
-         "<h3>Recent pooled sessions</h3>"
-         (if (seq (:sessions pool))
-           (str "<table><thead><tr><th>hash</th><th>state</th><th>age</th><th>idle</th><th>continuation</th></tr></thead><tbody>"
-                (apply str (map session-row (:sessions pool))) "</tbody></table>")
-           "<p class=\"muted\">No pooled WebSocket sessions.</p>")
-         "<p class=\"muted\">Read-only local operator view. Session identifiers are short hashes; no credentials, API keys, prompts, or upstream payloads are shown.</p>")))
+    (with-meta
+      [
+       [:h2 "Runtime"]
+     (definition-list
+       [["Listener" (get-in snapshot [:listener :address])]
+        ["nREPL Listener" (if (:nrepl-enabled features)
+                            (get-in snapshot [:nrepl :address])
+                            "Disabled")]
+        ["Uptime" (str (:uptime-seconds snapshot) " seconds")]
+        ["Requests served" (:requests snapshot)]
+        ["Request limit" (str (get-in snapshot [:listener :request-limit-bytes]) " bytes")]
+        ["API-key guard" (if (:api-key-auth-enabled features) "enabled" "disabled")]
+        ["Codex authentication" (if (get-in snapshot [:codex :authenticated]) "ready" "not ready")]
+        ["Token expiry" (if (some? token-expiry)
+                           (str token-expiry " seconds remaining")
+                           "unavailable")]])
+     [:h2 "WebSocket pool"]
+     (definition-list
+       [["Sessions" (str (:entries pool) " / " (:capacity pool)
+                          " (busy " (:busy pool) ", idle " (:idle pool) ")")]
+        ["Continuations" (:with-continuation pool)]
+        ["Idle TTL" (str (:idle-ttl-seconds pool) " seconds")]
+        ["Maximum age" (str (:max-age-seconds pool) " seconds")]])
+     [:h3 "Recent pooled sessions"]
+     (if (seq (:sessions pool))
+       [:table
+        [:thead [:tr
+                 [:th "hash"] [:th "state"] [:th "age"]
+                 [:th "idle"] [:th "continuation"]]]
+        [:tbody (map session-row (:sessions pool))]]
+       [:p {:class "muted"} "No pooled WebSocket sessions."])
+     [:p {:class "muted"}
+      "Read-only local operator view. Session identifiers are short hashes; no credentials, API keys, prompts, or upstream payloads are shown."]]
+      {::chassis/content true})))
 
-(defn- html-attributes [attributes]
-  (apply str
-         (map (fn [[key value]]
-                (str " " (name key) "=\"" (escape-html value) "\""))
-              attributes)))
+(defn- fragment
+  [snapshot]
+  (chassis-html (fragment-tree snapshot)))
 
-(defn page [snapshot]
+(defn page
+  [snapshot]
   (let [init (datastar/init-opts {:selector "#dashboard"})]
-    (str "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jolt LLM Proxy</title>"
-         "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'\">"
-         "<style>body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem}"
-         "dl{display:grid;grid-template-columns:max-content 1fr;gap:.4rem 1rem}dt{font-weight:600}dd{margin:0}"
-         "table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.35rem;text-align:left}"
-         ".muted{color:#666}</style>"
-         "<script type=\"module\" src=\"/_llm-proxy/datastar.js\"></script></head>"
-         "<body><h1>Jolt LLM Proxy</h1>"
-         "<section id=\"dashboard\"" (html-attributes init) ">"
-         (fragment snapshot) "</section></body></html>")))
+    (chassis-html
+      [chassis/doctype-html5
+       [:html
+        [:head
+         [:meta {:charset "utf-8"}]
+         [:title "Jolt LLM Proxy"]
+         [:meta {:http-equiv "Content-Security-Policy"
+                 :content "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'"}]
+         [:style
+          "body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem}"
+          "dl{display:grid;grid-template-columns:max-content 1fr;gap:.4rem 1rem}dt{font-weight:600}dd{margin:0}"
+          "table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.35rem;text-align:left}"
+          ".muted{color:#666}"]
+         [:script {:type "module" :src "/_llm-proxy/datastar.js"}]]
+        [:body
+         [:h1 "Jolt LLM Proxy"]
+         [:section (merge {:id "dashboard"} init)
+          (fragment-tree snapshot)]]]])))
 
 (defn static-js []
-  (slurp (or (io/resource "public/js/datastar.js")
+  (slurp (or (io/resource "public/js/datastar-v1.0.3")
              (throw (ex-info "vendored Datastar bundle is missing" {})))))
 
-(defn- render-response [state request]
+(defn- render-response
+  [state request]
   (if (:jolt.datastar/sse-request request)
     {:status 200
      :headers {"Content-Type" "text/html; charset=utf-8"}
@@ -121,7 +164,8 @@
       :handler handler
       :stop! stop!})))
 
-(defn route [runtime req]
+(defn route
+  [runtime req]
   (when (:dashboard-enabled runtime)
     (case (:uri req)
       "/_llm-proxy" ((get-in runtime [:dashboard :handler]) req)

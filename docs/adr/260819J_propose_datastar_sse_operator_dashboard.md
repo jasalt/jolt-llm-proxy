@@ -57,8 +57,9 @@ It is a second optional operator interface over HTTP/SSE.
 - Reserve a non-OpenAI path prefix such as `/_llm-proxy/` for the page, static
   Datastar asset, and its SSE subscription. Do not place an administrative UI
   at `/v1/*`.
-- Keep dashboard code in `llm-proxy.dashboard`, distinct from the outbound
-  `llm-proxy.transport.sse` namespace.
+- Render dashboard fragments as Chassis Hiccup trees. Chassis owns escaping and
+  serialization; the application does not concatenate untrusted values into raw
+  HTML strings.
 - Wrap only the dashboard sub-handler with `jolt.datastar.core/wrap-datastar`;
   the OpenAI API and its SSE responses never pass through Datastar middleware.
 - Serve the page and its SSE subscription from the same `/_llm-proxy/` route,
@@ -132,7 +133,7 @@ transitive Glimmer revision and v1.0 wire protocol are compatible with the
 vendored official Datastar v1.0.3 browser bundle:
 
 ```text
-resources/public/js/datastar.js
+resources/public/js/datastar-v1.0.3
 SHA-256: 5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65
 ```
 

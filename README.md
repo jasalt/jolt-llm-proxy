@@ -94,7 +94,7 @@ reverse proxy without a separately reviewed browser authentication design. It
 renders the redacted inspection snapshot through Glimmer and
 `glimmer-datastar`; the Datastar SSE subscription uses the same
 `/_llm-proxy/` URL as the page. It vendors Datastar v1.0.3 under
-`resources/public/js/datastar.js`; normal proxy startup does not enable the
+`resources/public/js/datastar-v1.0.3`; normal proxy startup does not enable the
 dashboard.
 
 `JOLT_LLM_PROXY_ADDR` accepts only `127.0.0.1:<port>` or
