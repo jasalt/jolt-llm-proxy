@@ -4,6 +4,7 @@
             [codex.collect-test]
             [codex.cli-test]
             [llm-proxy.core-test]
+            [llm-proxy.flow-test]
             [codex.continuation-test]
             [llm-proxy.proxy-test]
             [llm-proxy.schema-test]
@@ -19,6 +20,7 @@
                      'codex.collect-test
                      'codex.cli-test
                      'llm-proxy.core-test
+                     'llm-proxy.flow-test
                      'codex.continuation-test
                      'llm-proxy.proxy-test
                      'llm-proxy.schema-test
