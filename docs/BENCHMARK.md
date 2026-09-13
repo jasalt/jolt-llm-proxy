@@ -1,25 +1,30 @@
-# Memory benchmark and optimization findings 26-08-20
+# Startup and memory benchmark findings 26-09-13
 
-**Benchmark below led to finding Jolt compiler optimization bug that has been solved, Ruuter adds more towards 2MiB to idle RSS with optimizations on after the fix https://github.com/jolt-lang/jolt/pull/685**
+**Updated for Jolt v0.8.7.** The large reduction from the original baseline is
+primarily attributable to the Jolt compiler/runtime upgrade from v0.7.20 to
+v0.8.7. Removing Ruuter and using the direct dispatcher also contributes, but
+the measurements do not isolate those effects from the runtime upgrade. The
+Jolt optimization issue noted in the original investigation was fixed upstream:
+<https://github.com/jolt-lang/jolt/pull/685>
 
 ## Scope
 
-This is an idle-memory investigation of the standalone Jolt build. Initial
-measurements were taken before the routing optimization; post-optimization
-measurements are included below. Measurements were taken on this Linux x86-64
-environment using the optimized, direct-linked build:
+This is a startup and idle-memory investigation of the standalone Jolt build.
+The current measurements use the optimized, direct-linked build produced with
+Jolt v0.8.7:
 
 ```sh
 jolt build -m llm-proxy.core \
-  -o /tmp/jolt-llm-proxy-measure \
+  -o target/jolt-llm-proxy \
   --opt --direct-link
 ```
 
-The process was started, allowed to reach `:proxy-started`, left idle for two
-seconds, and measured through `/proc/<pid>/status` and
-`/proc/<pid>/smaps_rollup`. RSS is resident memory; PSS is included to make the
-shared/private distinction explicit. The target for this investigation is
-idle RSS below 100 MiB.
+The process was started with a valid local credential file, allowed to reach
+its listening socket, left idle for approximately one second, and measured
+through `/proc/<pid>/status` and `/proc/<pid>/smaps_rollup`. Startup time is
+process start to listening-socket readiness. RSS is resident memory; PSS is
+included to make the shared/private distinction explicit. The target for this
+investigation is idle HTTP-only RSS below 100 MiB.
 
 ## Baseline measurements
 
@@ -68,14 +73,14 @@ idle.
 
 The Ruuter-only probe is approximately 73.8 MiB above the empty binary. The
 probe containing the proxy dependency closure but no Ruuter is approximately
-75 MiB below the full proxy closure. This makes a direct route dispatcher the
-highest-confidence optimization.
+75 MiB below the full proxy closure. These historical probes identified the
+direct route dispatcher as a worthwhile application optimization, but they do
+not account for the later Jolt v0.8.7 runtime/compiler change.
 
 The full production process adds approximately 10 MiB over the proxy closure
-for lifecycle, CLI, and nREPL/core startup code. Therefore, replacing Ruuter
-projects the complete server into roughly the 60–70 MiB RSS range. This is an
-estimate until the real server is rebuilt with the replacement dispatcher, but
-it has a substantial margin below 100 MiB.
+for lifecycle, CLI, and nREPL/core startup code. The current measurements show
+that the upgraded runtime and the dispatcher together keep the complete server
+in the roughly 60–70 MiB RSS range, with substantial margin below 100 MiB.
 
 ## Build optimization findings
 
@@ -114,30 +119,57 @@ data retained by the process:
 The measured RSS is mostly private resident memory, so heap-reservation tuning
 is not the first-order solution for this target.
 
-## Post-optimization result
+## Current Jolt v0.8.7 result
 
-Ruuter was removed from `deps.edn` and replaced with a direct exact
-method/path dispatcher in `llm-proxy.proxy`. The optimized rebuilt server was
-measured with the same procedure:
+The current binary is approximately 19.6 MiB and reaches HTTP readiness in
+approximately 0.3–0.5 seconds. Repeated startup measurements had a median of
+about 0.36 seconds for HTTP-only mode. The process briefly reached
+approximately 177 MiB RSS during startup before settling near 60 MiB; startup
+peak and idle RSS should therefore be treated as separate deployment metrics.
 
-| Configuration     |          RSS |      PSS | Threads |
-|-------------------|-------------:|---------:|--------:|
-| HTTP only         | **58.8 MiB** | 53.0 MiB |      11 |
-| Dashboard + nREPL | **59.1 MiB** | 53.3 MiB |      12 |
+| Configuration     | Startup to listening socket | RSS after ~1 s |      PSS | Threads |
+|-------------------|----------------------------:|---------------:|---------:|--------:|
+| HTTP only         |              ~357 ms median |       59.6 MiB | 54.7 MiB |      11 |
+| Dashboard enabled |                     ~598 ms |       59.3 MiB | 54.3 MiB |      11 |
+| nREPL enabled     |                     ~629 ms |       60.7 MiB | 55.9 MiB |      12 |
+| Dashboard + nREPL |                     ~600 ms |       60.0 MiB | 55.1 MiB |      12 |
 
-This is approximately a 56 MiB RSS reduction, or 42%, from the 134.7 MiB
-HTTP-only baseline, and meets the idle RSS target with substantial margin.
-The optimized executable produced by this rebuild was approximately 18 MiB.
+The measured HTTP-only RSS is approximately 75 MiB below the original
+v0.7.20-era baseline of 134.7 MiB, a reduction of roughly 56%. Since the
+application changed at the same time, this is not a controlled attribution;
+the evidence indicates that the Jolt v0.8.7 upgrade accounts for most of the
+improvement, with Ruuter's removal providing an additional reduction.
 
-The route and full test suite passed after the replacement.
+The current result meets the idle RSS target with approximately 40 MiB of
+margin. Dashboard and nREPL add little retained memory, although nREPL adds
+one thread. Measurements were taken without making upstream network requests.
+
+## Attribution and limitations
+
+The historical baseline was measured with Jolt v0.7.20, while the current
+binary uses Jolt v0.8.7. The direct dispatcher and dependency changes were
+also made between those measurements, so the benchmark cannot mathematically
+separate compiler/runtime improvements from application changes. Do not treat
+the 56% reduction as a Ruuter-only result.
+
+The executable is a platform-specific artifact; record the Jolt version, build
+flags, target platform, and binary hash with release measurements. The
+optimized build is not the same as a development build, and tree shaking still
+bails out when dynamic resolution is reachable.
+
+The route and full test suite passed after the dispatcher replacement.
 
 ## Recommended follow-up work
 
-### 1. Preserve the memory regression benchmark
+### 1. Preserve the startup and memory regression benchmark
 
-Keep the same idle RSS/PSS measurement in release validation. The acceptance
-criterion is idle HTTP-only RSS below 100 MiB, with dashboard and nREPL
-measured separately.
+Keep the same startup and idle RSS/PSS measurement in release validation. The
+acceptance criteria are:
+
+- idle HTTP-only RSS below 100 MiB;
+- startup to HTTP readiness below one second on the benchmark host;
+- dashboard and nREPL measured separately;
+- startup peak RSS reported separately from settled idle RSS.
 
 ### 2. Reduce optional build closure if additional margin is required
 
@@ -158,6 +190,6 @@ application closure regardless of whether the feature is enabled.
 Reducing worker threads and changing Chez heap reservation parameters should
 not be attempted as the first fix. The process used 11 threads, but the
 standalone probe used one thread and still retained the dependency-driven
-memory. The dependency closure, especially Ruuter before its removal, was the
-dominant factor. Chez heap-reservation tuning and worker-thread changes were
-not needed to meet the target.
+memory. The Jolt v0.8.7 compiler/runtime improvement is the primary explanation
+for the current reduction; dependency and dispatcher changes are secondary
+contributors. Further tuning was not needed to meet the target.
