@@ -3,6 +3,7 @@
   parser and retry behavior can be tested without application globals."
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
+            [ebb.core :as m]
             [jolt.http-client :as http]
             [codex.auth :as auth]))
 
@@ -46,7 +47,7 @@
 
           :else (:body response))))))
 
-(defn- dispatch! [event data emit]
+(defn- event-map [event data]
   (when (seq data)
     (let [raw (str/join "\n" data)]
       (when (not= raw "[DONE]")
@@ -54,36 +55,78 @@
               name (if (and (string? event) (not= event ""))
                      event
                      (:type object))]
-          (emit {:name name :data object}))))))
+          {:name name :data object})))))
+
+(defn- consume-line
+  "Advance the pure SSE framing state for one line. The returned `:event` is
+  either one parsed Codex event or nil; callers decide how to consume it."
+  [{:keys [event data]} line]
+  (let [line (str/trim line)]
+    (cond
+      (= line "") {:event nil :data [] :emitted (event-map event data)}
+      (str/starts-with? line "event:")
+      {:event (str/trim (subs line 6)) :data data :emitted nil}
+      (str/starts-with? line "data:")
+      {:event event :data (conj data (str/trim (subs line 5))) :emitted nil}
+      :else {:event event :data data :emitted nil})))
 
 (defn read-events
   "Parse SSE input and emit `{:name :data}` event maps. Input may be a complete
-  string or an InputStream."
+  string or an InputStream. This deterministic parser intentionally stays
+  synchronous; the live source below owns blocking reads through Ebb."
   [in emit]
   (let [reader (java.io.BufferedReader.
                  (if (string? in)
                    (java.io.StringReader. in)
                    (java.io.InputStreamReader. in "UTF-8")))]
-    (loop [event nil data []]
-      (let [line (.readLine reader)]
-        (if (nil? line)
-          (when (seq data) (dispatch! event data emit))
-          (let [line (str/trim line)]
-            (cond
-              (= line "")
-              (do (when (seq data) (dispatch! event data emit))
-                  (recur nil []))
+    (loop [state {:event nil :data []}]
+      (if-let [line (.readLine reader)]
+        (let [{:keys [emitted] :as next-state} (consume-line state line)]
+          (when emitted (emit emitted))
+          (recur (dissoc next-state :emitted)))
+        (when-let [emitted (event-map (:event state) (:data state))]
+          (emit emitted))))))
 
-              (str/starts-with? line "event:")
-              (recur (str/trim (subs line 6)) data)
+(defn- produce-events
+  "Return an Ebb task that reads and emits one parsed event at a time. Each
+  `emit!` is a rendezvous task supplied by `flow/with-event-source`, so a slow
+  downstream consumer backpressures reads instead of buffering or dropping
+  Codex events."
+  [in emit!]
+  (m/sp
+    (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. in "UTF-8"))]
+      (loop [state {:event nil :data []}]
+        (let [line (m/? (m/via m/blk (.readLine reader)))]
+          (if (nil? line)
+            (do
+              (when-let [event (event-map (:event state) (:data state))]
+                (m/? (emit! event)))
+              :eof)
+            (let [{:keys [emitted] :as next-state} (consume-line state line)]
+              (when emitted (m/? (emit! emitted)))
+              (recur (dissoc next-state :emitted)))))))))
 
-              (str/starts-with? line "data:")
-              (recur event (conj data (str/trim (subs line 5))))
-
-              :else (recur event data))))))))
+(defn acquire
+  "Return an Ebb task acquiring one structured SSE resource for
+  `flow/with-event-source`. Opening and reading the HTTP stream occur on Ebb's
+  blocking executor. `:abort!` and `:release!` are idempotent and close the
+  response body, including when a downstream Ring client disconnects."
+  [runtime request session-id]
+  (m/sp
+    (let [in (m/? (m/via m/blk (open-upstream runtime request session-id)))
+          closed? (atom false)
+          close! (fn []
+                   (when (compare-and-set! closed? false true)
+                     (when (instance? java.io.Closeable in)
+                       (.close ^java.io.Closeable in))))]
+      {:produce (fn [emit!] (produce-events in emit!))
+       :abort! close!
+       :release! (fn [_] (close!))})))
 
 (defn source
-  "Return the common event-source interface used by the proxy."
+  "Deprecated callback adapter retained only while proxy handlers complete their
+  Milestone 6 conversion. New callers must pass `(acquire ...)` to
+  `flow/with-event-source`."
   [runtime request session-id]
   (let [in (open-upstream runtime request session-id)]
     {:read (fn [emit] (read-events in emit))
