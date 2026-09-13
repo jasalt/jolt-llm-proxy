@@ -132,7 +132,33 @@ normal `jolt.http.platform` users never access these fields directly. Therefore
 it is less important than a failing public API and should be offered as a small
 documentation PR, not reported as a high-severity blocker.
 
-## Do not report upstream
+## JI-4: Chassis uses an unavailable Jolt ArrayDeque method
+
+**Upstream:** <https://github.com/onionpancakes/chassis>
+
+**Observed on:** Jolt `d782ba6` (v0.8.7 baseline), Chassis v1.0.365
+
+**Reproduction:**
+
+```clojure
+(require '[dev.onionpancakes.chassis.core :as chassis])
+(chassis/html [:div "hello"])
+```
+
+**Observed error:**
+
+```text
+IllegalArgumentException: No matching field found: pollFirst for class java.util.ArrayDeque
+```
+
+Chassis' depth-first serializer calls `.pollFirst`. Jolt's
+`java.util.ArrayDeque` shim supports the equivalent `.removeFirst` operation
+but does not expose `.pollFirst`.
+
+**Workaround in this project:** use Chassis for the Hiccup tree, token
+serialization, and escaping, while traversing Chassis nodes with an equivalent
+local traversal that uses `.removeFirst`. The dependency itself is not modified.
+
 
 ### JI-3: `BIO_ctrl` / OpenSSL 3 hypothesis — disproved
 
