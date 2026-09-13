@@ -1,6 +1,8 @@
 (ns llm-proxy.core-test
   (:require [clojure.test :refer [deftest is]]
-            [llm-proxy.core :as core]))
+            [ebb.core :as m]
+            [llm-proxy.core :as core]
+            [llm-proxy.dashboard :as dashboard]))
 
 (def authenticated-store
   (atom {:access_token "token" :account_id "account"}))
@@ -79,6 +81,31 @@
                               (fn [_handler _options]
                                 (throw (ex-info "bind failed" {}))))))
     (is (= 1 @stops))
+    (is (nil? @core/system))))
+
+(deftest repeated-start-stop-cancels-every-dashboard-task
+  (let [starts (atom 0)
+        cancels (atom 0)
+        sleep-task (fn [_]
+                     (fn [_success failure]
+                       (fn []
+                         (swap! cancels inc)
+                         (failure (m/cancelled "dashboard stopped")))))
+        start-dashboard (fn [runtime]
+                          (swap! starts inc)
+                          (dashboard/start! runtime {:sleep-task sleep-task}))]
+    (doseq [_ (range 2)]
+      (core/start! :port 9999
+                   :dashboard true
+                   :store authenticated-store
+                   :start-dashboard start-dashboard
+                   :run-server (fn [handler options]
+                                 {:handler handler :options options})
+                   :stop-server (fn [_] nil))
+      (core/stop!)
+      (core/stop!))
+    (is (= 2 @starts))
+    (is (= 2 @cancels))
     (is (nil? @core/system))))
 
 (deftest licenses-command-prints-the-embedded-notice
