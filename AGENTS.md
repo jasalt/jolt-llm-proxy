@@ -38,7 +38,7 @@ language semantics.
 
 ## Reporting errors
 
-If Jolt language upstream project, or it's libraries or documentation include gaps or bugs that need diagnosing or workarounds during process, file them in JOLT-ISSUES.md as reproducible tickets that can be forwarded to maintainers.
+If Jolt language upstream project, or it's libraries or documentation include gaps or bugs that need diagnosing or workarounds during process, file them in `docs/JOLT-ISSUES.md` as reproducible tickets that can be forwarded to maintainers.
 
 Jolt sources are available at [~/dev/jail/jolt/jolt](~/dev/jail/jolt/jolt), see [~/dev/jail/jolt/AGENTS.md](~/dev/jail/jolt/AGENTS.md).
 
