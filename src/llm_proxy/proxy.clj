@@ -8,12 +8,14 @@
   (:require [clojure.string :as str]
             [clojure.data.json :as json]
             [clojure.core.async :as async]
+            [ebb.core :as m]
             [ring-chez.sse :as sse]
             [codex.collect :as collect]
             [codex.translate :as tr]
             [llm-proxy.transport.sse :as transport-sse]
             [llm-proxy.transport.ws :as transport-ws]
             [llm-proxy.dashboard :as dashboard]
+            [llm-proxy.flow :as flow]
             [llm-proxy.error :as error]
             [llm-proxy.id :as id]
             [llm-proxy.time :as time]))
@@ -136,22 +138,35 @@
 ;; ---------------------------------------------------------------------------
 
 (defn sse-source [runtime request session-id]
-  (transport-sse/source runtime request session-id))
+  (transport-sse/acquire runtime request session-id))
 
 (defn open-event-source [runtime request session-id for-chat]
   (let [pool (:pool runtime)
         default-session (:session-id runtime)]
     (if (and pool (not= session-id "") (not= session-id default-session))
-      (try
-        (transport-ws/source runtime request session-id for-chat)
-        (catch Throwable ws-error
-          (if (error/ws-fallback? ws-error)
-            (do
-              (error/log! :warn :ws-fallback ws-error
-                          {:session-hash (when session-id (id/short-hash session-id))})
-              (sse-source runtime request session-id))
-            (throw ws-error))))
+      (m/sp
+        (try
+          (m/? (transport-ws/acquire runtime request session-id for-chat))
+          (catch Throwable ws-error
+            (if (error/ws-fallback? ws-error)
+              (do
+                (error/log! :warn :ws-fallback ws-error
+                            {:session-hash (when session-id (id/short-hash session-id))})
+                (m/? (sse-source runtime request session-id)))
+              (throw ws-error)))))
       (sse-source runtime request session-id))))
+
+(defn- event-reader
+  "Adapt a pull task to the existing deterministic collector callback shape.
+  This is local to the Ring cutover: protocol reducers remain plain Clojure,
+  while every pull remains inside the surrounding Ebb task."
+  [next-event]
+  (fn [emit]
+    (loop []
+      (let [{:keys [status value]} (m/? (next-event))]
+        (when (= status :event)
+          (emit value)
+          (recur))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Handlers
@@ -173,30 +188,35 @@
           (let [[request model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
-                src (open-event-source runtime request session-id true)]
+                acquire (open-event-source runtime request session-id true)]
         (if stream
-          (let [ch (async/chan)]
-            (async/thread
-              (try
-                (let [meta (collect/stream-chat (:read src) model ch runtime)]
-                  (try ((:finalize src) meta) (catch Throwable _ nil)))
-                (catch Throwable e
-                  (sse/send! ch {:event "message"
-                                  :data (json/write-str
-                                          {:error {:message (error/stream-message e)
-                                                   :type "api_error"
-                                                   :code "upstream_error"}})})
-                  (sse/send! ch {:event "message" :data "[DONE]"})
-                  (async/close! ch))))
+          (let [ch (async/chan)
+                task (flow/with-event-source
+                       acquire
+                       (fn [next-event]
+                         (m/sp (collect/stream-chat (event-reader next-event)
+                                                    model ch runtime))))
+                {:keys [body]} (flow/task->channel
+                                 task
+                                 {:channel ch
+                                  :error-values (fn [failure]
+                                                  (sse/send! ch
+                                                    {:event "message"
+                                                     :data (json/write-str
+                                                             {:error {:message (error/stream-message failure)
+                                                                      :type "api_error"
+                                                                      :code "upstream_error"}})})
+                                                  (sse/send! ch {:event "message" :data "[DONE]"})
+                                                  [])})]
             {:status 200
              :headers {"Content-Type" "text/event-stream"
                        "Cache-Control" "no-cache" "X-Accel-Buffering" "no"}
-             :body ch})
-          (let [[response meta] (try (collect/collect-chat (:read src) model runtime)
-                                     (catch Throwable e
-                                       ((:finalize src) {:completed false})
-                                       (throw e)))]
-            ((:finalize src) meta)
+             :body body})
+          (let [[response _] (m/? (flow/with-event-source
+                                    acquire
+                                    (fn [next-event]
+                                      (m/sp (collect/collect-chat
+                                              (event-reader next-event) model runtime)))))]
             {:status 200
              :headers {"Content-Type" "application/json"}
              :body (json/write-str response)}))))))))
@@ -217,25 +237,29 @@
           (let [[request _model stream] parsed
                 session-id session-result
                 request (apply-prompt-cache-key request session-id)
-                src (open-event-source runtime request session-id false)]
+                acquire (open-event-source runtime request session-id false)]
         (if stream
-          (let [ch (async/chan)]
-            (async/thread
-              (try
-                (let [meta (collect/stream-responses (:read src) ch)]
-                  (try ((:finalize src) meta) (catch Throwable _ nil)))
-                (catch Throwable e
-                  (collect/send-stream-error ch (error/stream-message e))
-                  (async/close! ch))))
+          (let [ch (async/chan)
+                task (flow/with-event-source
+                       acquire
+                       (fn [next-event]
+                         (m/sp (collect/stream-responses (event-reader next-event) ch))))
+                {:keys [body]} (flow/task->channel
+                                 task
+                                 {:channel ch
+                                  :error-values (fn [failure]
+                                                  (collect/send-stream-error ch
+                                                                             (error/stream-message failure))
+                                                  [])})]
             {:status 200
              :headers {"Content-Type" "text/event-stream"
                        "Cache-Control" "no-cache" "X-Accel-Buffering" "no"}
-             :body ch})
-          (let [[response meta] (try (collect/collect-response (:read src))
-                                     (catch Throwable e
-                                       ((:finalize src) {:completed false})
-                                       (throw e)))]
-            ((:finalize src) meta)
+             :body body})
+          (let [[response _] (m/? (flow/with-event-source
+                                    acquire
+                                    (fn [next-event]
+                                      (m/sp (collect/collect-response
+                                              (event-reader next-event))))))]
             {:status 200
              :headers {"Content-Type" "application/json"}
              :body (json/write-str response)}))))))))

@@ -122,14 +122,3 @@
       {:produce (fn [emit!] (produce-events in emit!))
        :abort! close!
        :release! (fn [_] (close!))})))
-
-(defn source
-  "Deprecated callback adapter retained only while proxy handlers complete their
-  Milestone 6 conversion. New callers must pass `(acquire ...)` to
-  `flow/with-event-source`."
-  [runtime request session-id]
-  (let [in (open-upstream runtime request session-id)]
-    {:read (fn [emit] (read-events in emit))
-     :finalize (fn [_]
-                 (when (instance? java.io.Closeable in)
-                   (.close ^java.io.Closeable in)))}))

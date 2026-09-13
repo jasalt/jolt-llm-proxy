@@ -22,6 +22,16 @@ history.
 > API-key guard, and the `login`/`logout`/`usage`/`info` CLI. Implemented
 > architectural decisions are recorded under [`docs/adr/`](./docs/adr/).
 
+## Concurrency and lifecycle model
+
+Ebb owns outbound SSE/WebSocket request lifetimes: acquisition, ordered
+lossless event consumption, client-disconnect cancellation, and exactly-once
+release. Blocking network operations run on Ebb's blocking executor. Pure
+Codex translation and collection stay ordinary Clojure. `core.async` remains
+only at the Ring Chez response-channel edge. The optional dashboard separately
+uses Glimmer/Datastar over a sampled, bounded, redacted inspection snapshot.
+See [`260913A`](./docs/adr/260913A_ebb_request_lifecycles.md).
+
 ## Prerequisites
 
 - Jolt v0.8.7 (the tested version; Ebb requires v0.8.1 or newer)

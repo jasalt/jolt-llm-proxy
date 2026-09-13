@@ -1,5 +1,6 @@
 (ns llm-proxy.proxy-test
   (:require [clojure.test :refer [deftest is]]
+            [ebb.core :as m]
             [clojure.string :as str]
             [clojure.data.json :as json]
             [llm-proxy.error :as error]
@@ -52,19 +53,19 @@
 (deftest websocket-fallback-is-limited-to-marked-transport-failures
   (let [runtime {:pool {} :session-id "default"}
         request {:model "gpt-5.4"}
-        sse-source {:read identity :finalize identity}]
-    (with-redefs [transport-ws/source (fn [& _]
-                                        (throw (ex-info "socket unavailable"
-                                                        {:type :ws-transport})))
-                  transport-sse/source (fn [& _] sse-source)]
-      (is (= sse-source (proxy/open-event-source runtime request "client" false))))
-    (with-redefs [transport-ws/source (fn [& _]
-                                        (throw (ex-info "invalid token: secret"
-                                                        {:type :auth})))
-                  transport-sse/source (fn [& _]
-                                         (throw (Exception. "must not fall back")))]
+        sse-source (m/sp :sse)]
+    (with-redefs [transport-ws/acquire (fn [& _]
+                                         (m/sp (throw (ex-info "socket unavailable"
+                                                               {:type :ws-transport}))))
+                  transport-sse/acquire (fn [& _] sse-source)]
+      (is (= :sse (m/? (proxy/open-event-source runtime request "client" false)))))
+    (with-redefs [transport-ws/acquire (fn [& _]
+                                         (m/sp (throw (ex-info "invalid token: secret"
+                                                               {:type :auth}))))
+                  transport-sse/acquire (fn [& _]
+                                          (m/sp (throw (Exception. "must not fall back"))))]
       (is (= :auth
-             (try (proxy/open-event-source runtime request "client" false)
+             (try (m/? (proxy/open-event-source runtime request "client" false))
                   nil
                   (catch Throwable e (:type (ex-data e)))))))))
 
@@ -127,7 +128,7 @@
               504 "upstream_timeout"]
              [(Exception. "internal token=private")
               500 "internal_error"]]]
-      (with-redefs [transport-sse/source (fn [& _] (throw failure))]
+      (with-redefs [transport-sse/acquire (fn [& _] (m/sp (throw failure)))]
         (let [response ((proxy/make-handler runtime) request)
               body (json/read-str (:body response) :key-fn keyword)]
           (is (= expected-status (:status response)))

@@ -3,11 +3,12 @@
 Updated: 2026-09-13
 
 - [x] Milestones 0–3: Jolt/Ebb/Glimmer baseline, dashboard migration, and lossless structured event-source contract.
-- [ ] Milestone 4: migrate upstream SSE acquisition/reading to `flow/with-event-source`; retain pure parser coverage.
-- [ ] Milestone 5: structured WebSocket acquisition/reading is implemented; add direct pool/continuation cancellation coverage and complete the proxy cutover.
-- [ ] Milestone 6: move proxy streaming and non-streaming request orchestration onto structured Ebb tasks.
-- [ ] Milestone 7: remove obsolete `:read`/`:finalize` contract and document final architecture.
+- [x] Milestone 4: SSE acquisition/reading uses `flow/with-event-source`; pure parser coverage remains.
+- [x] Milestone 5: WebSocket acquisition/reading has structured ownership and continuation-safe release.
+- [x] Milestone 6: proxy streaming and non-streaming orchestration uses structured Ebb tasks.
+- [x] Milestone 7: final architecture documented; obsolete source contract removed and deterministic verification complete.
+- [ ] External verification: credentialed live SSE/WebSocket continuation and mid-stream client-abort checks require a user-provided authenticated environment.
 
 ## Current working slice
 
-Milestones 4–5: structured SSE and WebSocket acquisition APIs exist. Legacy callback adapters remain temporarily for the Milestone 6 proxy cutover. Next: factor collector consumers to pull Ebb events, then convert streaming and non-streaming proxy handlers and remove adapters.
+Implementation milestones are complete. Final deterministic checks: full tests, LSP, flake evaluation, standalone AOT build, namespace load, and diff check. Credentialed live transport checks remain explicitly external.
