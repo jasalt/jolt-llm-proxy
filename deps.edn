@@ -4,12 +4,18 @@
                   ;; Kept explicit even though Malli currently brings it transitively:
                   ;; property tests are an intentional test-suite dependency.
                   :extra-deps {org.clojure/test.check {:mvn/version "1.1.3"}}}}
- :deps {jolt-lang/ring-chez-adapter
+ :deps {jlt-commons/ebb
+        {:git/url "https://github.com/jlt-commons/ebb"
+         :git/sha "cd3b36ddd07be14f81c3690d084a44adcb08a5c2"}
+        jolt-lang/glimmer-datastar
+        {:git/url "https://github.com/jolt-lang/glimmer-datastar"
+         :git/sha "560d2c3248d5e12ea738d7ccaa9cab8ba835f1f5"}
+        jolt-lang/ring-chez-adapter
         {:git/url "https://github.com/jolt-lang/ring-chez-adapter"
-         :git/sha "40be7b0fe9ebbcc2baa817ba102ce0fd9a5acdfd"}
+         :git/sha "e49cc7699cdf50e182a63bf595a582bceda342b8"}
         jolt-lang/http-client
         {:git/url "https://github.com/jolt-lang/http-client"
-         :git/sha "6faba3570378df91c2c84a588a262b732f4f1858"}
+         :git/sha "b98833b8338b66d435cdbffa480ba2b59c005a2e"}
         clojure/data.json
         {:git/url "https://github.com/clojure/data.json"
          :git/sha "94463ffb54482427fd9b31f264b06bff6dcfd557"}

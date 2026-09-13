@@ -4,9 +4,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     jolt = {
+      # Keep the flake on the Jolt v0.8.7 release commit. Ebb requires
+      # Jolt v0.8.1 or newer, and an exact revision keeps Nix builds stable.
       # Jolt's flake includes its submodules; use the git scheme so Nix
       # preserves that requirement when it locks this input.
-      url = "git+https://github.com/jolt-lang/jolt.git?submodules=1";
+      url = "git+https://github.com/jolt-lang/jolt.git?rev=d782ba692f4bdc2a2975e19832bed0a32a1fd331&submodules=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -33,9 +35,8 @@
           name = "jolt-llm-proxy";
           runtimeInputs = [ joltPackage ];
           text = ''
-            # The project's pinned http-client/jolt-crypto revisions load
-            # OpenSSL through the platform loader rather than Jolt's newer
-            # JOLT_OPENSSL_LIBDIR seam. Keep both paths available.
+            # Make the native OpenSSL libraries available both through Jolt's
+            # configured lookup seam and the platform loader fallback.
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.openssl ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             export DYLD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.openssl ]}''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 

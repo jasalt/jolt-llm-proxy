@@ -24,7 +24,7 @@ history.
 
 ## Prerequisites
 
-- Jolt v0.7.20 (the tested version; includes `ProcessBuilder.inheritIO()`)
+- Jolt v0.8.7 (the tested version; Ebb requires v0.8.1 or newer)
 - Linux x86_64 with glibc and system OpenSSL 3
 - Git/network access on first run so Jolt can resolve the exact dependency SHAs
   pinned in `deps.edn`

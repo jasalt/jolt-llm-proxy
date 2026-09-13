@@ -17,18 +17,21 @@ jobs:
           persist-credentials: false
       - name: Install Jolt
         run: |
-          version=0.7.16
+          version=0.8.7
+          archive=jolt-v${version}-x86_64-linux.tar.gz
           release=https://github.com/jolt-lang/jolt/releases/download/v${version}
-          curl -fsSL "$release/jolt-v${version}-x86_64-linux.tar.gz" -o jolt.tar.gz
+          curl -fsSL "$release/$archive" -o "$archive"
+          echo "fec4b404ed1118074e04688d8277967dd66dd2f3fdd3365bb22330908215c944  $archive" | sha256sum -c -
           mkdir jolt-dist
-          tar -xzf jolt.tar.gz -C jolt-dist
+          tar -xzf "$archive" -C jolt-dist
           jolt_bin=$(find jolt-dist -type f -name jolt -perm -u+x -print -quit)
           test -n "$jolt_bin"
           sudo install "$jolt_bin" /usr/local/bin/jolt
           jolt --version
       - name: Load production namespaces
         run: >-
-          jolt -e '(doseq [n (quote [llm-proxy.core llm-proxy.dashboard llm-proxy.id
+          jolt -e '(doseq [n (quote [ebb.core glimmer.ratom jolt.datastar.core
+          llm-proxy.core llm-proxy.dashboard llm-proxy.id
           llm-proxy.inspect llm-proxy.proxy llm-proxy.schema
           llm-proxy.transport.sse llm-proxy.transport.ws
           codex.auth codex.cli codex.collect codex.continuation codex.translate
