@@ -123,6 +123,66 @@
      (reset! cancel-ref (:cancel! result))
      result)))
 
+(defn with-event-source
+  "Run one owned, lossless event source through `consume`.
+
+  `acquire` is an Ebb task yielding a resource map with:
+
+  * `:produce` — `(fn [emit!] task)`, where the producer calls
+    `(m/? (emit! event))` for every event;
+  * `:abort!` — idempotently interrupts/closes an incomplete active read; and
+  * `:release!` — called exactly once with the terminal outcome.
+
+  `consume` receives a pull function returning a task whose value is one of
+  `{:status :event :value event}` or `{:status :done :terminal value}`. An
+  asynchronous producer failure is thrown by the next pull.
+
+  Events cross a zero-capacity Ebb rendezvous: an emit task settles only after
+  its consumer has requested that event. This gives ordered, lossless
+  backpressure without `observe`, `relieve`, or an unbounded queue. Cancellation
+  cancels a blocked emit, invokes `:abort!`, and releases the resource once."
+  [acquire consume]
+  (m/sp
+    (let [{:keys [produce abort! release!]} (m/? acquire)
+          port (m/rdv)
+          outcome (atom nil)
+          emit! (fn [event] (port {:status :event :value event}))
+          producer
+          (m/sp
+            (try
+              (let [terminal (m/? (produce emit!))]
+                (m/? (port {:status :done :terminal terminal}))
+                terminal)
+              (catch Throwable failure
+                ;; A cancelled consumer is already tearing down the producer.
+                ;; Sending it a second terminal value could park forever.
+                (when-not (cancelled? failure)
+                  (m/? (port {:status :failed :failure failure})))
+                (throw failure))))]
+      (try
+        (let [[terminal result]
+              (m/? (m/join vector
+                           producer
+                           (consume (fn []
+                                      (m/sp
+                                        (let [message (m/? port)]
+                                          (if (= :failed (:status message))
+                                            (throw (:failure message))
+                                            message)))))))]
+          (reset! outcome {:status :completed
+                           :terminal terminal
+                           :result result})
+          result)
+        (catch Throwable failure
+          (reset! outcome {:status (if (cancelled? failure) :cancelled :failed)
+                           :failure failure})
+          (throw failure))
+        (finally
+          (let [result @outcome]
+            (when-not (= :completed (:status result))
+              (abort!))
+            (release! result)))))))
+
 (defn flow->channel
   "Start discrete Ebb `source` and bridge its values, in order, to a Ring
   channel body. Returns `{:body channel :cancel! fn}` and accepts the same
