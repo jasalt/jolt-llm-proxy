@@ -93,7 +93,7 @@ The dashboard is loopback-only, read-only, and must not be exposed through a
 reverse proxy without a separately reviewed browser authentication design. It
 renders the redacted inspection snapshot through Glimmer and
 `glimmer-datastar`; the Datastar SSE subscription uses the same
-`/_llm-proxy/` URL as the page. It vendors Datastar v1.0.2 under
+`/_llm-proxy/` URL as the page. It vendors Datastar v1.0.3 under
 `resources/public/js/datastar.js`; normal proxy startup does not enable the
 dashboard.
 

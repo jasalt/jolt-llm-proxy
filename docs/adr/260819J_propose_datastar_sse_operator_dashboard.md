@@ -117,10 +117,10 @@ administrative commands with their own authorization review.
 - Render dynamic values through escaping Hiccup/data APIs, never raw generated
   HTML from upstream/client data. Send appropriate restrictive response headers
   (at minimum content type, frame embedding policy, and a CSP compatible with
-  the vendored module script). Datastar v1.0.2 compiles its declarative
-  attributes with `Function`, so the local dashboard CSP must include the
-  narrow `script-src 'unsafe-eval'` exception; it does not permit inline
-  scripts or remote script origins.
+  the vendored module script). Datastar v1.0.3 compiles its declarative
+  attributes with `Function` when the CSP nonce path is not active, so the local
+  dashboard CSP includes the narrow `script-src 'unsafe-eval'` exception; it does
+  not permit inline scripts or remote script origins.
 - Dashboard opening must not make a failed/unauthenticated Codex backend appear
   healthy: distinguish proxy listener health from backend authentication and
   latest-upstream-result state.
@@ -129,11 +129,11 @@ administrative commands with their own authorization review.
 
 The migration pins `jolt-lang/glimmer-datastar` at an exact commit. Its
 transitive Glimmer revision and v1.0 wire protocol are compatible with the
-vendored official Datastar v1.0.2 browser bundle:
+vendored official Datastar v1.0.3 browser bundle:
 
 ```text
 resources/public/js/datastar.js
-SHA-256: 2837d87acf6ee0ba8e4e63765926c25a98d63883b02f88be194a86b81d3fd24a
+SHA-256: 5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65
 ```
 
 The bundle is loaded only by the explicit dashboard route and is embedded in

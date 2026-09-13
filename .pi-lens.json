@@ -1,0 +1,5 @@
+{
+  "ignore": [
+    "resources/public/js/datastar.js"
+  ]
+}

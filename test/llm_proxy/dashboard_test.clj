@@ -111,7 +111,7 @@
                                    :uri "/_llm-proxy/datastar.js"})]
     (is (= 200 (:status response)))
     (is (= "application/javascript" (get-in response [:headers "Content-Type"])))
-    (is (.contains (:body response) "Datastar v1.0.2"))
+    (is (.contains (:body response) "Datastar v1.0.3"))
     (is (.contains (:body response) "datastar-patch-elements"))))
 
 (deftest reactive-state-renders-datastar-patches-without-duplicates
