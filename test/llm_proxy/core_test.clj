@@ -5,6 +5,9 @@
 (def authenticated-store
   (atom {:access_token "token" :account_id "account"}))
 
+(def serve-options
+  (ns-resolve 'llm-proxy.core 'serve-options))
+
 (deftest owns-and-stops-an-isolated-system
   (let [stopped (atom [])
         running (core/start! :port 9999
@@ -43,6 +46,41 @@
     (core/stop!)
     (is (= 1 @stopped))))
 
+(deftest dashboard-sampler-is-owned-by-core-lifecycle
+  (let [starts (atom 0)
+        stops (atom 0)
+        running (core/start! :port 9999
+                             :dashboard true
+                             :store authenticated-store
+                             :run-server (fn [handler options]
+                                           {:handler handler :options options})
+                             :stop-server (fn [_] nil)
+                             :start-dashboard
+                             (fn [_runtime]
+                               (swap! starts inc)
+                               {:state :safe-presentation-state
+                                :stop! #(swap! stops inc)}))]
+    (is (= 1 @starts))
+    (is (= :safe-presentation-state (get-in running [:dashboard :state])))
+    (core/stop!)
+    (core/stop!)
+    (is (= 1 @stops))))
+
+(deftest failed-start-cancels-dashboard-sampler
+  (let [stops (atom 0)]
+    (is (thrown? Throwable
+                 (core/start! :dashboard true
+                              :store authenticated-store
+                              :start-dashboard
+                              (fn [_runtime]
+                                {:state :safe-presentation-state
+                                 :stop! #(swap! stops inc)})
+                              :run-server
+                              (fn [_handler _options]
+                                (throw (ex-info "bind failed" {}))))))
+    (is (= 1 @stops))
+    (is (nil? @core/system))))
+
 (deftest licenses-command-prints-the-embedded-notice
   (let [out (with-out-str (core/licenses-command {}))]
     (is (.contains out "This software is licensed under the MIT License."))
@@ -53,18 +91,18 @@
   (is (false? (core/nrepl-flag? [])))
   (is (true? (core/nrepl-flag? ["--nrepl"])))
   (is (= {:dashboard true}
-         (core/serve-options ["--dashboard"])))
+         (serve-options ["--dashboard"])))
   (is (= {:port 8090}
-         (core/serve-options ["--port" "8090"])))
+         (serve-options ["--port" "8090"])))
   (is (= {:port 8090}
-         (core/serve-options ["-p" "8090"])))
+         (serve-options ["-p" "8090"])))
   (is (= {:nrepl true :nrepl-port 7889}
-         (core/serve-options ["--nrepl" "--nrepl-port" "7889"])))
+         (serve-options ["--nrepl" "--nrepl-port" "7889"])))
   (is (= {:nrepl-port 7889}
-         (core/serve-options ["-np" "7889"])))
-  (is (thrown? Throwable (core/serve-options ["--port" "0"])))
-  (is (thrown? Throwable (core/serve-options ["--nrepl-port" "65536"])))
+         (serve-options ["-np" "7889"])))
+  (is (thrown? Throwable (serve-options ["--port" "0"])))
+  (is (thrown? Throwable (serve-options ["--nrepl-port" "65536"])))
   (is (thrown? Throwable (core/serve-command {:opts {:nrepl-port 7889}})))
-  (is (thrown? Throwable (core/serve-options ["--port" "65536"])))
-  (is (thrown? Throwable (core/serve-options ["--unexpected"])))
-  (is (thrown? Throwable (core/serve-options ["unexpected-argument"]))))
+  (is (thrown? Throwable (serve-options ["--port" "65536"])))
+  (is (thrown? Throwable (serve-options ["--unexpected"])))
+  (is (thrown? Throwable (serve-options ["unexpected-argument"]))))

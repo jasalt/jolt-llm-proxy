@@ -11,6 +11,7 @@
             [nrepl.middleware]
             [codex.auth :as auth]
             [codex.ws :as ws]
+            [llm-proxy.dashboard :as dashboard-ui]
             [llm-proxy.proxy :as proxy]
             [codex.cli :as cli]
             [llm-proxy.id :as id]
@@ -46,11 +47,12 @@
   "Initialise the proxy. Production defaults can be replaced at explicit
   dependency seams for deterministic lifecycle tests."
   [& {:keys [port api-key auth-path store run-server stop-server
-             nrepl-port start-nrepl dashboard now-ms random-hex]
+             nrepl-port start-nrepl dashboard start-dashboard now-ms random-hex]
       :or {port 8080 api-key "" dashboard false
            run-server adapter/run-server
            stop-server adapter/stop-server
            start-nrepl start-nrepl!
+           start-dashboard dashboard-ui/start!
            now-ms system-now-ms
            random-hex id/random-hex}}]
   (when @system
@@ -73,10 +75,13 @@
                    ;; patches without recompiling the Ring routes.
                    :runtime-state system
                    :dashboard-enabled dashboard}
-          handler (proxy/make-handler runtime)
           started (atom {})]
       (try
-          (let [srv (run-server handler
+          (let [dashboard-resource (when dashboard (start-dashboard runtime))
+                _ (swap! started assoc :stop-dashboard (:stop! dashboard-resource))
+                runtime (assoc runtime :dashboard dashboard-resource)
+                handler (proxy/make-handler runtime)
+                srv (run-server handler
                       {:port port
                        :strategy :threads
                        :worker-threads 8
@@ -99,6 +104,8 @@
                        :dashboard-enabled dashboard})
             running)
           (catch Throwable e
+            (when-let [stop-dashboard (:stop-dashboard @started)]
+              (try (stop-dashboard) (catch Throwable _ nil)))
             (when-let [stop-nrepl (:stop-nrepl @started)]
               (try (stop-nrepl) (catch Throwable _ nil)))
             (when-let [srv (:server @started)]
@@ -113,7 +120,10 @@
   "Shut down the server, close pooled WS connections, clear system."
   []
   (when-let [running @system]
-    ;; Clear ownership first so repeated stop calls are harmless.
+    ;; Cancel presentation-state publication before disposing runtime state.
+    ;; Dashboard stop is idempotent, as is the top-level lifecycle operation.
+    (when-let [stop-dashboard (get-in running [:dashboard :stop!])]
+      (try (stop-dashboard) (catch Throwable _ nil)))
     (reset! system nil)
     (when-let [stop-nrepl (:stop-nrepl running)]
       (try (stop-nrepl) (catch Throwable _ nil)))

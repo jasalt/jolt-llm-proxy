@@ -1,6 +1,7 @@
 (ns llm-proxy.dashboard-test
   (:require [clojure.test :refer [deftest is]]
             [clojure.core.async :as async]
+            [ebb.core :as m]
             [llm-proxy.dashboard :as dashboard]
             [llm-proxy.inspect :as inspect]
             [llm-proxy.proxy :as proxy]))
@@ -21,6 +22,40 @@
    :requests (atom 0)
    :dashboard-enabled true
    :runtime-state (atom nil)})
+
+(defn- await!
+  [pred]
+  (loop [remaining 100]
+    (cond
+      (pred) true
+      (zero? remaining) false
+      :else (do (Thread/sleep 10)
+                (recur (dec remaining))))))
+
+(deftest dashboard-sampler-publishes-only-safe-snapshots
+  (let [rt (runtime)
+        {:keys [state stop!]} (dashboard/start! rt {:interval-ms 10})]
+    (try
+      (reset! (:requests rt) 7)
+      (is (await! #(= 7 (:requests @state))))
+      (is (= false (contains? @state :session-id)))
+      (is (= false (contains? @state :store)))
+      (is (not (re-find #"secret-token|secret-api-key|raw-session-id"
+                        (pr-str @state))))
+      (finally (stop!)))))
+
+(deftest dashboard-sampler-cancellation-is-idempotent
+  (let [cancels (atom 0)
+        sleep-task (fn [_]
+                     (fn [_success failure]
+                       (fn []
+                         (swap! cancels inc)
+                         (failure (m/cancelled "sampler stopped")))))
+        {:keys [stop!]} (dashboard/start! (runtime)
+                                          {:sleep-task sleep-task})]
+    (stop!)
+    (stop!)
+    (is (= 1 @cancels))))
 
 (deftest dashboard-is-optional-and-excluded-from-request-metrics
   (let [request {:request-method :get :uri "/_llm-proxy" :headers {}}

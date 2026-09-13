@@ -1,10 +1,38 @@
 (ns llm-proxy.dashboard
   "Optional read-only Datastar SSE operator dashboard."
   (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
+            [ebb.core :as m]
+            [glimmer.ratom :as ratom]
             [ring-chez.sse :as sse]
+            [llm-proxy.flow :as flow]
             [llm-proxy.inspect :as inspect]))
 
-(def prefix "/_llm-proxy")
+(defn- sampler-task
+  [runtime state interval-ms sleep-task]
+  (m/sp
+    (loop []
+      (reset! state (inspect/snapshot runtime))
+      (m/? (sleep-task interval-ms))
+      (recur))))
+
+(defn start!
+  "Start the reactive presentation-state sampler for `runtime`.
+
+  The returned map is an explicit lifecycle resource containing only the safe
+  snapshot ratom and an idempotent stop function. `sleep-task` is injectable
+  for deterministic lifecycle tests."
+  ([runtime] (start! runtime {}))
+  ([runtime {:keys [interval-ms sleep-task on-failure]
+             :or {interval-ms 1000
+                  sleep-task m/sleep
+                  on-failure (fn [_] nil)}}]
+   (let [state (ratom/atom (inspect/snapshot runtime))
+         stop! (flow/start-task!
+                 (sampler-task runtime state interval-ms sleep-task)
+                 {:on-failure on-failure})]
+     {:state state
+      :stop! stop!})))
 
 (defn- escape-html [value]
   (let [s (str value)]
@@ -76,7 +104,7 @@
        "<p>Connecting…</p></div></body></html>"))
 
 (defn static-js []
-  (slurp (or (clojure.java.io/resource "public/js/datastar.js")
+  (slurp (or (io/resource "public/js/datastar.js")
              (throw (ex-info "vendored Datastar bundle is missing" {})))))
 
 (defn page-response []
