@@ -132,11 +132,12 @@ normal `jolt.http.platform` users never access these fields directly. Therefore
 it is less important than a failing public API and should be offered as a small
 documentation PR, not reported as a high-severity blocker.
 
-## JI-4: Chassis uses an unavailable Jolt ArrayDeque method
+## JI-4: Jolt's ArrayDeque shim omits `pollFirst`
 
-**Upstream:** <https://github.com/onionpancakes/chassis>
+**Upstream:** <https://github.com/jolt-lang/jolt>
 
-**Observed on:** Jolt `d782ba6` (v0.8.7 baseline), Chassis v1.0.365
+**Status:** Confirmed on Jolt `d782ba6` (v0.8.7 baseline) with Chassis
+v1.0.365. Jolt main at `be356e5` still provides `.poll` but not `.pollFirst`.
 
 **Reproduction:**
 
@@ -151,13 +152,16 @@ documentation PR, not reported as a high-severity blocker.
 IllegalArgumentException: No matching field found: pollFirst for class java.util.ArrayDeque
 ```
 
-Chassis' depth-first serializer calls `.pollFirst`. Jolt's
-`java.util.ArrayDeque` shim supports the equivalent `.removeFirst` operation
-but does not expose `.pollFirst`.
+Chassis' depth-first serializer calls the standard `Deque.pollFirst` method.
+Jolt's `java.util.ArrayDeque` shim supports `.poll`, which has the same
+head-removal semantics (including returning nil when empty), but does not expose
+`.pollFirst`. This is a Jolt compatibility gap rather than a Chassis defect.
 
-**Workaround in this project:** use Chassis for the Hiccup tree, token
-serialization, and escaping, while traversing Chassis nodes with an equivalent
-local traversal that uses `.removeFirst`. The dependency itself is not modified.
+**Workaround in this project:** `llm-proxy.jolt-shims` uses the documented
+`jolt.host/extend-class!` seam to add `pollFirst` as a delegation to `.poll`.
+The dashboard can consequently call `chassis/html` unchanged instead of
+maintaining a copy of Chassis' traversal. The extension does not use
+`:override`, so a future built-in Jolt implementation takes precedence.
 
 
 ### JI-3: `BIO_ctrl` / OpenSSL 3 hypothesis — disproved

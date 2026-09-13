@@ -1,6 +1,7 @@
 (ns llm-proxy.dashboard-test
   (:require [clojure.test :refer [deftest is]]
             [clojure.core.async :as async]
+            [dev.onionpancakes.chassis.core :as chassis]
             [ebb.core :as m]
             [llm-proxy.dashboard :as dashboard]
             [llm-proxy.inspect :as inspect]
@@ -167,6 +168,15 @@
     (is (= true (get-in snapshot [:codex :ws-pool :sessions 0 :continuation])))
     (is (not= "raw-session-id"
               (get-in snapshot [:codex :ws-pool :sessions 0 :id])))))
+
+(deftest chassis-uses-the-array-deque-shim
+  (is (= "<div><span>hello</span></div>"
+         (chassis/html [:div [:span "hello"]])))
+  (let [deque (java.util.ArrayDeque.)]
+    (is (nil? (.pollFirst deque)))
+    (.add deque "first")
+    (is (= "first" (.pollFirst deque)))
+    (is (nil? (.pollFirst deque)))))
 
 (deftest chassis-escapes-snapshot-content
   (let [snapshot (assoc-in (inspect/snapshot (runtime))

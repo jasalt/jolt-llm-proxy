@@ -2,6 +2,7 @@
   "Optional read-only Glimmer/Datastar operator dashboard. The only reactive
   value is a bounded, redacted `inspect/snapshot` presentation model."
   (:require [clojure.java.io :as io]
+            [llm-proxy.jolt-shims]
             [dev.onionpancakes.chassis.core :as chassis]
             [ebb.core :as m]
             [glimmer.ratom :as ratom]
@@ -17,31 +18,10 @@
       (m/? (sleep-task interval-ms))
       (recur))))
 
-(defn- reduce-tree-jolt
-  "Chassis uses ArrayDeque.pollFirst, which is not exposed by Jolt's Java
-  shim. Keep Chassis' traversal and serialization, swapping only this stack
-  primitive for the equivalent removeFirst operation."
-  [branch? children rf init root]
-  (let [stack (java.util.ArrayDeque. 32)]
-    (loop [cur (.iterator ^Iterable (vector root)) ret init]
-      (if (reduced? ret)
-        (.deref ^clojure.lang.IDeref ret)
-        (if (some? cur)
-          (if (.hasNext cur)
-            (let [node (.next cur)]
-              (if (branch? node)
-                (do
-                  (.addFirst stack cur)
-                  (recur (.iterator ^Iterable (children node)) ret))
-                (recur cur (rf ret node))))
-            (recur (when (pos? (.size stack)) (.removeFirst stack)) ret))
-          ret)))))
-
 (defn- chassis-html
   [tree]
-  (let [sb (StringBuilder. 16384)]
-    (reduce-tree-jolt chassis/branch? chassis/children chassis/append-fragment sb tree)
-    (.toString sb)))
+  (chassis/html tree))
+
 (defn- session-row
   [{:keys [id state age-seconds idle-seconds continuation]}]
   [:tr
