@@ -164,7 +164,7 @@ Pi's provider-specific long-retention request field. The proxy still forwards
 supported text, image, tool, structured-output, and reasoning request fields
 through its Chat Completions translation.
 
-## Build a standalone binary
+## Build a standalone binary and install
 
 Jolt resolves the pinned dependencies, compiles the `llm-proxy.core` entry
 point, and embeds `resources/` into a self-contained native binary. Build on
@@ -183,6 +183,9 @@ jolt build -m llm-proxy.core -o target/jolt-llm-proxy --dev
 # The executable contains the application and resources; Jolt is not needed
 # to run it after the build.
 ./target/jolt-llm-proxy --help
+
+# Install to ~/.local/bin/ (ensure it is in $PATH)
+install -Dm755 target/jolt-llm-proxy ~/.local/bin/jolt-llm-proxy
 ```
 
 The build command above was verified with Jolt's standalone build mode. The
@@ -190,6 +193,14 @@ result is platform-specific; rebuild it for each target OS/architecture and
 ship it with the system OpenSSL/glibc requirements described in Prerequisites.
 Credentials are deliberately not embedded: the binary reads the normal
 `~/.config/jolt-llm-proxy/auth.json` path (or `JOLT_LLM_PROXY_AUTH_FILE`).
+
+## Running as SystemD service
+
+See [contrib/jolt-llm-proxy.service](contrib/jolt-llm-proxy.service) for minimal user service file and usage info.
+
+Developing live server on host via nREPL from a sandboxed coding agent breaks the sandboxing which should be taken into consideration, avoid running the service non-sandboxed in that scenario.
+
+See also (WIP) [contrib/jolt-llm-proxy-sandboxed.service](contrib/jolt-llm-proxy-sandboxed.service) variant with nREPL server and namespace isolation / sandboxing using [systemd-run](https://www.man7.org/linux/man-pages/man1/systemd-run.1.html).
 
 ## Why Jolt
 
