@@ -69,6 +69,29 @@
                   nil
                   (catch Throwable e (:type (ex-data e)))))))))
 
+(deftest responses-handler-consumes-structured-events
+  (let [released (atom [])
+        resource (m/sp {:produce (fn [emit!]
+                                   (m/sp
+                                     (m/? (emit! {:name "response.output_text.delta"
+                                                   :data {:delta "hello"}}))
+                                     (m/? (emit! {:name "response.completed"
+                                                   :data {:response {:id "resp_test"
+                                                                     :output []}}}))
+                                     :eof))
+                        :abort! (fn [] nil)
+                        :release! #(swap! released conj %)})
+        handler (proxy/make-handler {:api-key "" :session-id "default"})
+        request {:request-method :post :uri "/v1/responses" :headers {}
+                 :body "{\"model\":\"gpt-5.4\",\"input\":\"hello\"}"}]
+    (with-redefs [transport-sse/acquire (fn [& _] resource)]
+      (let [response (handler request)
+            body (json/read-str (:body response) :key-fn keyword)]
+        (is (= 200 (:status response)))
+        (is (= "hello" (:output_text body)))
+        (is (= "resp_test" (:id body)))
+        (is (= :completed (:status (first @released))))))))
+
 (deftest rejected-input-logging-keeps-only-safe-schema-paths
   (let [captured (atom [])
         runtime {:api-key "" :session-id "default" :pool {}}
