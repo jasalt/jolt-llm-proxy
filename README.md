@@ -1,3 +1,5 @@
+**Archived after finding more complete alternative https://github.com/router-for-me/CLIProxyAPI**
+
 # jolt-llm-proxy
 
 A generic Jolt-based LLM proxy architecture with the current Codex/ChatGPT
