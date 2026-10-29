@@ -1,0 +1,14 @@
+[Unit]
+Description=Jolt LLM Proxy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Environment=JOLT_LLM_PROXY_API_KEY=change-me
+Environment=JOLT_LLM_PROXY_AUTH_FILE=%h/.config/jolt-llm-proxy/auth.json
+ExecStart=%h/.local/bin/jolt-llm-proxy serve --port 11400
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,35 @@
+[Unit]
+Description=Jolt LLM Proxy (Sandboxed)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# 1. Chroot / Filesystem Isolation
+RootDirectory=%h/.local/share/jolt-proxy-rootfs
+# Bind mount the static binary and config into the rootfs
+BindReadOnlyPaths=%h/.local/bin/jolt-llm-proxy:/app/jolt-llm-proxy
+BindReadOnlyPaths=%h/.config/jolt-llm-proxy/auth.json:/etc/auth.json
+
+# 2. Environment
+Environment=JOLT_LLM_PROXY_API_KEY=change-me
+Environment=JOLT_LLM_PROXY_AUTH_FILE=/etc/auth.json
+
+# 3. Execution (Inside the RootDirectory)
+ExecStart=/app/jolt-llm-proxy serve --port 11400
+
+# 4. Sandboxing & Security
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+NoNewPrivileges=yes
+
+# 5. Restart logic
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
