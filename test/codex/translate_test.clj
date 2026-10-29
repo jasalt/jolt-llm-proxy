@@ -1,7 +1,8 @@
 (ns codex.translate-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.data.json :as json]
-            [codex.translate :as translate]))
+            [codex.translate :as translate]
+            [codex.continuation :as continuation]))
 
 (deftest translates-chat-request
   (let [[request model stream]
@@ -117,7 +118,6 @@
 (deftest prepared-input-supports-delta-continuation
   ;; Input items keywordized by prepare-responses must keep matching prefixes
   ;; in codex.continuation (regression guard for the string-key parser).
-  (require '[codex.continuation :as continuation])
   (let [[turn1 _ _] (translate/prepare-responses
                       (json/write-str {:model "m"
                                        :input [{:role "user" :content "hi"}]}))

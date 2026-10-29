@@ -158,10 +158,16 @@
    :dashboard {:coerce :boolean
                :desc "Enable the loopback read-only operator dashboard"}})
 
+(defn- normalize-command-args
+  "Preserve the historical multi-character -np alias with bundled babashka.cli,
+  which now parses it as the grouped short options -n -p."
+  [args]
+  (mapv #(if (= "-np" %) "--nrepl-port" %) args))
+
 (defn- serve-options
   "Strictly parse the supported `serve` options for direct unit coverage."
   [args]
-  (bcli/parse-opts args {:spec serve-option-spec
+  (bcli/parse-opts (normalize-command-args args) {:spec serve-option-spec
                           :restrict true
                           :restrict-args true
                           :no-keyword-opts true}))
@@ -226,5 +232,5 @@
 (defn -main [& args]
   ;; Preserve the historical no-argument behavior while gaining generated help,
   ;; command validation, and an extensible option surface.
-  (bcli/dispatch command-tree (if (seq args) args ["serve"])
+  (bcli/dispatch command-tree (if (seq args) (normalize-command-args args) ["serve"])
                  {:prog "jolt -m llm-proxy.core" :help true}))

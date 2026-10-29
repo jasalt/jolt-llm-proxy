@@ -1,4 +1,123 @@
-# Startup and memory benchmark findings 26-09-13
+# Build size and runtime memory — Jolt v0.8.21 (2026-10-11)
+
+**Follow-up diagnosis:** [MEMORY-REGRESSION.md](MEMORY-REGRESSION.md) isolates
+most of the increase to automatically embedded dependency resources and their
+static vfasl representation. Excluding unused JS externs reduces optimized
+HTTP-only idle RSS from 232.4 to 164.6 MiB; combining that with plain boot gives
+125.6 MiB, but increases startup peak memory. The historical ~60 MiB artifact
+has a different namespace closure (no Ebb/Glimmer); a same-current-source
+v0.8.7 rebuild uses 123.1 MiB. Production build settings remain unchanged.
+
+Upgraded the Nix input from v0.8.7 to the latest tagged release, **v0.8.21**,
+commit `5b46858a171f30949f5b09eb484bc6c5ff93c6ea`. Nix reports the version as
+`jolt 5b46858` because upstream uses the flake's short revision as its version.
+The nixpkgs and application dependency pins were left unchanged.
+
+## Controlled build comparison
+
+All executable builds are AOT. Here **basic** means the default release build
+(no flags), **AOT** means the project's optimized deployment build, and
+**tree-shaken** means that same deployment build with shaking requested.
+The last name is not a claim that pruning succeeded.
+
+| Build/run | Executable MiB | Idle RSS MiB | Idle PSS MiB | Peak RSS MiB | HTTP ready, ms |
+|-----------|---------------:|-------------:|-------------:|-------------:|---------------:|
+| Basic: default `jolt build` | 55.99 | 283.7 | 279.3 | 337.7 | 1,035 |
+| AOT: `--opt --direct-link` | **28.63** | **232.4** | **228.0** | **256.5** | 718 |
+| Tree-shaking requested: `--opt --direct-link --tree-shake` | 27.82 | 253.5 | 249.1 | 280.4 | 704 |
+| Development: `--dev` | 45.51 | 254.9 | 250.5 | 286.8 | 876 |
+| Source run: `jolt -m llm-proxy.core` (warm namespace cache) | n/a | 178.5 | 165.2 | 178.5 | 1,030 |
+
+**Recommendation:** keep `--opt --direct-link`. It cuts executable size by
+48.9% and idle RSS by 18.1% versus the default build. The tree-shaking request
+produces a 2.8% smaller executable but uses 9.1% more idle RSS than optimized
+AOT in this experiment. These are measurements of this build/host, not a
+universal claim about tree shaking.
+
+**Actual tree-shake result: skipped.** The compiler names
+`jolt.nrepl/evaluate -> clojure.core/load-string`, plus nREPL's runtime var and
+namespace lookups. It also suggests an `:allow-dynamic` list naming
+`borkdude.dynaload/resolve*`. We did not apply that list: nREPL really executes
+dynamic code, and permitting lookups cannot make the evaluator safe over a
+pruned core. Even after bailing out, the requested-shake build emits a single
+application compile unit rather than the per-namespace units in the normal
+build (observed in the build directories). Therefore its size/memory difference
+is **not evidence of successful dead-code elimination**.
+
+## Method and reproducibility
+
+- Fedora 44 x86_64 Lima VM, Linux 6.19.10, glibc 2.43, eight vCPUs on
+  AMD Ryzen 7 PRO 7840U. Built using the project's pinned Nix development shell.
+- Five sequential fresh processes per mode; table entries are medians. Each
+  process is measured two seconds after a successful loopback `/health` response.
+  Readiness is process spawn to that response, not merely socket creation.
+- RSS and kernel peak RSS (`VmHWM`, since process start) come from
+  `/proc/<pid>/status`; PSS/private dirty from `smaps_rollup`. Memory units are
+  MiB (1,048,576 bytes); raw proc measurements are KiB. All modes had 19 threads.
+- HTTP-only, eight request workers, no dashboard/nREPL enabled for memory runs,
+  no upstream requests, disposable fake credentials, an API-key guard, no manual
+  GC, and the default boot encoding. Only `/health` precedes the memory sample;
+  `/v1/models` is smoke-tested afterwards.
+- Standalone binaries also passed `--help` and embedded `licenses` from a
+  temporary working directory without project source/resources. All four builds
+  separately passed dashboard sampling and nREPL (including the `-np` alias).
+- The source-run row is a reference, not a self-contained artifact: it requires
+  Jolt, project source/resources and dependency caches. Its launcher size would
+  not be comparable to an executable containing the application.
+- [Raw samples and binary hashes](benchmark-0821.json) preserve exact sizes,
+  build flags, runtime package path, and all five samples per mode. Build logs,
+  binaries, and fresh results are in ignored `target/benchmark/`.
+
+Requires Linux `/proc`, Python 3, and the project's Nix shell:
+
+```sh
+nix develop --command python3 tools/benchmark-builds.py --include-source
+# Measure existing artifacts without rebuilding:
+nix develop --command python3 tools/benchmark-builds.py --skip-build --include-source
+```
+
+The script owns and terminates only its own processes, uses temporary fake
+credentials, and never contacts the upstream model service. Artifacts are
+built with the equivalent of:
+
+```sh
+jolt build -m llm-proxy.core -o target/benchmark/basic
+jolt build -m llm-proxy.core -o target/benchmark/aot --opt --direct-link
+jolt build -m llm-proxy.core -o target/benchmark/tree-shaken --opt --direct-link --tree-shake
+jolt build -m llm-proxy.core -o target/benchmark/dev --dev
+```
+
+## Upgrade compatibility and limitations
+
+The suite passes: **76 tests, 289 assertions, zero failures/errors**. The
+upgrade required moving a test's namespace alias into its `ns` require,
+preserving the old multi-character `-np` alias before bundled CLI parsing,
+and adapting pinned Ebb's epoch-based timer binding to monotonic deadlines
+(see [JI-5](JOLT-ISSUES.md#ji-5-pinned-ebb-sleep-never-completes-on-jolt-v0821)).
+`nix build .#default` and the resulting launcher's `--help` also pass. The Nix
+package remains a source launcher, not one of the standalone artifacts.
+
+**The current builds do not meet the previous <100 MiB idle RSS target.** They
+also have larger executables and higher measured RSS than the historical
+v0.8.7 findings below. Those older results are not a controlled same-source,
+same-toolchain comparison and should not be used to attribute the regression
+solely to the Jolt version. The upstream Nix flake uses nixpkgs' `pkgs.chez`
+directly, whereas the v0.8.21 release notes describe gains requiring Jolt's
+patched Chez kernel. This experiment measures the Nix package actually used
+by this project, not upstream's prebuilt release binaries; the packaging
+difference is a follow-up to investigate, not a proven explanation of all the
+memory increase. In particular, source-run retained memory is lower here than
+standalone retained memory. No forced-GC or loaded-traffic measurements were
+made, and startup timing is subject to VM scheduling/cache noise.
+
+Runtime hosts still need zlib and OpenSSL: the compiler reports `z`, `crypto`,
+and `ssl` as dynamically loaded native libraries. “Standalone” means no Jolt
+or Chez installation or Clojure source is needed, not static linkage of every
+system library.
+
+---
+
+# Historical startup and memory benchmark findings 26-09-13
 
 **Updated for Jolt v0.8.7.** The large reduction from the original baseline is
 primarily attributable to the Jolt compiler/runtime upgrade from v0.7.20 to

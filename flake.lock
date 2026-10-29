@@ -8,17 +8,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1789154966,
-        "narHash": "sha256-PiLTumNw99frH3ZOGXiQZc0gMSxUKuzqKy8w51wVZVk=",
+        "lastModified": 1791695337,
+        "narHash": "sha256-ISdO+aNF/V/YI1xx3Kcj9OLbiCM2IfRpkpbXNQN+F+M=",
         "ref": "refs/heads/main",
-        "rev": "d782ba692f4bdc2a2975e19832bed0a32a1fd331",
-        "revCount": 3267,
+        "rev": "5b46858a171f30949f5b09eb484bc6c5ff93c6ea",
+        "revCount": 4175,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jolt-lang/jolt.git"
       },
       "original": {
-        "rev": "d782ba692f4bdc2a2975e19832bed0a32a1fd331",
+        "rev": "5b46858a171f30949f5b09eb484bc6c5ff93c6ea",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jolt-lang/jolt.git"

@@ -4,11 +4,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     jolt = {
-      # Keep the flake on the Jolt v0.8.7 release commit. Ebb requires
+      # Pin the Jolt v0.8.21 release commit. Ebb requires
       # Jolt v0.8.1 or newer, and an exact revision keeps Nix builds stable.
       # Jolt's flake includes its submodules; use the git scheme so Nix
       # preserves that requirement when it locks this input.
-      url = "git+https://github.com/jolt-lang/jolt.git?rev=d782ba692f4bdc2a2975e19832bed0a32a1fd331&submodules=1";
+      url = "git+https://github.com/jolt-lang/jolt.git?rev=5b46858a171f30949f5b09eb484bc6c5ff93c6ea&submodules=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

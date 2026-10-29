@@ -36,7 +36,7 @@ See [`260913A`](./docs/adr/260913A_ebb_request_lifecycles.md).
 
 ## Prerequisites
 
-- Jolt v0.8.7 (the tested version; Ebb requires v0.8.1 or newer)
+- Jolt v0.8.21 (the tested release, pinned by commit in `flake.nix`; Ebb requires v0.8.1 or newer)
 - Linux x86_64 with glibc and system OpenSSL 3
 - Git/network access on first run so Jolt can resolve the exact dependency SHAs
   pinned in `deps.edn`
@@ -55,7 +55,7 @@ plus a launcher package. It supports `x86_64-linux` and `aarch64-darwin`.
 
 ```bash
 nix develop
-nix build .#default
+nix build '.#default'
 ./result/bin/jolt-llm-proxy --help
 nix run . -- serve --port 8090
 ```
@@ -184,12 +184,13 @@ the target Linux/Chez platform (or use Jolt's documented `--target` /
 `--target-pack` cross-compilation options):
 
 ```bash
-# Produces an optimized native executable at target/jolt-llm-proxy taking ~3min.
+# Produces an optimized native executable at target/jolt-llm-proxy.
+# Requires OpenSSL (libssl/libcrypto) and zlib on the runtime host.
 # `--direct-link` reduces runtime var indirection for this closed-world binary.
 mkdir -p target
 jolt build -m llm-proxy.core -o target/jolt-llm-proxy --opt --direct-link
 
-# Faster uniptimized development build (takes ~30 sec)
+# Unoptimized development build (preserves application var redefinition)
 jolt build -m llm-proxy.core -o target/jolt-llm-proxy --dev
 
 # The executable contains the application and resources; Jolt is not needed
@@ -200,8 +201,13 @@ jolt build -m llm-proxy.core -o target/jolt-llm-proxy --dev
 install -Dm755 target/jolt-llm-proxy ~/.local/bin/jolt-llm-proxy
 ```
 
-The build command above was verified with Jolt's standalone build mode. The
-result is platform-specific; rebuild it for each target OS/architecture and
+The build command above was verified with Jolt v0.8.21. For reproducible
+Linux size and idle RSS/PSS comparisons, including the default, optimized,
+and tree-shaking-requested builds, see [docs/BENCHMARK.md](docs/BENCHMARK.md).
+Tree shaking currently bails out on the reachable nREPL evaluator; do not
+assume `--tree-shake` actually prunes this application.
+
+The result is platform-specific; rebuild it for each target OS/architecture and
 ship it with the system OpenSSL/glibc requirements described in Prerequisites.
 Credentials are deliberately not embedded: the binary reads the normal
 `~/.config/jolt-llm-proxy/auth.json` path (or `JOLT_LLM_PROXY_AUTH_FILE`).
